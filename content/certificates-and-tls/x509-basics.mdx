@@ -1,0 +1,66 @@
+# X.509 Basics
+
+## Why this matters
+
+X.509 certificates are a core part of how systems establish identity and trust. In real engineering work, they show up in HTTPS connections, code signing, package verification, WinRM, TLS-enabled services, internal PKI, and certificate-based authentication. If a certificate is expired, untrusted, misconfigured, or missing the right subject information, tools can fail in ways that look confusing at first: connection errors, trust warnings, signature failures, or authentication problems.
+
+For Windows and CLI workflows, this matters because engineers often need to inspect certificates, validate trust chains, troubleshoot secure connections, and determine whether a failure is caused by the network, the service, or the certificate itself. Understanding the basics helps you debug faster and avoid treating every TLS or signing error like a generic “security problem.”
+
+## Key Concepts
+
+- X.509 certificates bind an identity to a public key
+- Certificates are used to establish trust for encryption, authentication, and signing
+- Trust depends on certificate chains, issuers, expiration, and store placement
+- CLI tools and Windows components may fail if certificates are invalid, untrusted, or mismatched
+
+## Quick Summary
+
+X.509 certificates help systems verify identity and establish trust. In practice, engineers use them to secure connections, validate signatures, and troubleshoot why secure tools or services fail.
+
+## Quick Lab
+
+### In CMD
+
+<pre className="rounded-xl border border-gray-200 bg-gray-100 p-4 text-sm overflow-x-auto dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100">
+  <code>
+{`certutil -store My
+certutil -store Root`}
+  </code>
+</pre>
+
+### In PowerShell
+
+<pre className="rounded-xl border border-gray-200 bg-gray-100 p-4 text-sm overflow-x-auto dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100">
+  <code>
+{`Get-ChildItem Cert:\\CurrentUser\\My
+Get-ChildItem Cert:\\LocalMachine\\Root`}
+  </code>
+</pre>
+
+## What to Notice
+
+- Both environments let you inspect certificate stores, but they expose them differently
+- `certutil` is a classic Windows utility, while PowerShell exposes certificates through a provider-like path
+- You will see information such as issuer, subject, thumbprint, and expiration dates
+- Engineers often misunderstand that “having a certificate installed” is not the same as “the system trusts this certificate for the needed purpose”
+- Store location matters: Current User and Local Machine can produce different results and affect different tools
+
+## Interview Angle
+
+Be ready to explain:
+
+• what an X.509 certificate is actually doing in a secure system  
+• why trust chain, issuer, expiration, and store location matter  
+• how you would debug a certificate-related failure in a real environment  
+
+<Quiz
+  question="What is one of the main purposes of an X.509 certificate?"
+  options={[
+    "To replace the operating system firewall",
+    "To bind an identity to a public key for trust and secure communication",
+    "To automatically encrypt every file on disk",
+    "To guarantee that a script is bug-free"
+  ]}
+  answer="To bind an identity to a public key for trust and secure communication"
+  explanation="X.509 certificates are used to establish trust by associating an identity with a public key, which supports encryption, authentication, and signature validation."
+/>

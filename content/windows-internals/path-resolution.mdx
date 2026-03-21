@@ -1,0 +1,174 @@
+# PATH Resolution on Windows
+
+## Why this matters
+
+One of the most common real-world issues:
+
+> “This command works for me, but not for someone else.”
+
+This is almost always a **PATH problem**.
+
+CLI tools rely on PATH to locate executables. If PATH is incorrect, tools fail even when properly installed.
+
+---
+
+## Key Concepts
+
+- PATH is a list of directories the system searches for executables
+- Windows has:
+  - **User PATH**
+  - **System PATH**
+- These are combined at runtime
+- Order matters — earlier entries take priority
+
+---
+
+## Quick Summary
+
+PATH determines where the system looks for commands. Misconfigured PATH leads to “command not found” errors.
+
+---
+
+## Real-World Scenario
+
+A developer installs Node.js.
+
+- Works in PowerShell
+- Fails in CMD
+
+Error:
+
+```
+'node' is not recognized as an internal or external command
+```
+
+---
+
+## Why This Happens
+
+- PATH differs between shells
+- terminal may not have reloaded environment variables
+- installation added Node to PATH, but current session doesn’t see it
+
+---
+
+## Quick Lab
+
+### In CMD
+
+```bat
+echo %PATH%
+where node
+```
+
+---
+
+### In PowerShell
+
+```powershell
+$env:PATH
+Get-Command node
+```
+
+---
+
+## What to Notice
+
+- PATH output may differ between shells
+- one shell may locate `node`, another may not
+- restarting terminal often fixes the issue
+
+---
+
+## Deep Dive (Important)
+
+When a process starts:
+
+1. It inherits environment variables (including PATH)
+2. It does NOT automatically refresh them
+3. Each shell session can have a different PATH
+
+This explains:
+
+- VS Code terminal issues  
+- “works after restart” problems  
+- inconsistent behavior across tools  
+
+---
+
+## Debugging Strategy
+
+When a command is not found:
+
+1. Check PATH:
+
+```powershell
+$env:PATH
+```
+
+2. Locate executable:
+
+```powershell
+where node
+```
+
+3. Restart terminal
+4. Confirm installation path
+5. Check User vs System PATH
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- PATH is used to locate executables
+- Windows combines User and System PATH
+- environment variables are inherited at process start
+- mismatched environments cause inconsistent behavior
+
+Strong answer:
+
+“PATH resolution depends on the environment inherited by the shell. If a tool works in one shell but not another, it’s often because PATH differs or hasn’t been refreshed.”
+
+---
+
+<QuizSet
+  title="PATH Resolution Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is PATH used for?",
+      options: [
+        "Storing files",
+        "Locating executables",
+        "Managing memory",
+        "Controlling permissions"
+      ],
+      answer: "Locating executables",
+      explanation: "PATH tells the system where to look for commands."
+    },
+    {
+      question: "Why might a command work in PowerShell but not CMD?",
+      options: [
+        "Because CMD is slower",
+        "Because PATH may differ between environments",
+        "Because PowerShell installs tools automatically",
+        "Because Windows blocks CMD"
+      ],
+      answer: "Because PATH may differ between environments",
+      explanation: "Different shells can inherit different PATH values."
+    },
+    {
+      question: "Why does restarting a terminal fix PATH issues?",
+      options: [
+        "It clears memory",
+        "It reloads environment variables",
+        "It reinstalls software",
+        "It updates the registry"
+      ],
+      answer: "It reloads environment variables",
+      explanation: "New sessions inherit updated environment variables."
+    }
+  ]}
+/>

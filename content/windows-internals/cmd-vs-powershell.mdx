@@ -1,0 +1,62 @@
+# CMD vs PowerShell
+
+## Why this matters
+
+A CLI tool can behave differently depending on which shell launches it. Understanding the differences between CMD and PowerShell helps you diagnose issues with quoting, environment variables, command discovery, and script behavior.
+
+## Key Concepts
+
+- CMD is primarily string-oriented
+- PowerShell is object-oriented
+- Environment variable syntax differs
+- Quoting and escaping rules differ
+- Error handling and command discovery behave differently
+
+## Quick Summary
+
+CMD treats command output as plain text. PowerShell treats command output as structured objects. Because of this difference, commands, scripts, and CLI tools may behave differently depending on which shell executes them.
+
+## Quick Lab
+
+### In CMD, run:
+
+<pre>
+  <code>
+{`echo %USERNAME%
+echo %PATH%
+dir`}
+  </code>
+</pre>
+
+### In PowerShell, run:
+
+<pre>
+  <code>
+{`$env:USERNAME
+$env:PATH
+Get-ChildItem`}
+  </code>
+</pre>
+
+## What to Notice
+
+- Environment variables use `%VAR%` syntax in CMD and `$env:VAR` in PowerShell
+- CMD commands such as `dir` return plain text
+- PowerShell commands such as `Get-ChildItem` return structured objects
+- PowerShell supports pipelines that operate on objects instead of text
+
+## Interview Angle
+
+Be prepared to explain why a CLI tool might behave differently depending on the shell that launches it. Strong answers usually mention environment variable syntax, quoting rules, command lookup behavior, and the object-based pipeline in PowerShell.
+
+<Quiz
+  question="What is one of the most important differences between CMD and PowerShell?"
+  options={[
+    "CMD uses objects and PowerShell uses plain text",
+    "PowerShell uses objects and CMD is primarily text-oriented",
+    "They use identical variable syntax",
+    "They resolve commands in exactly the same way"
+  ]}
+  answer="PowerShell uses objects and CMD is primarily text-oriented"
+  explanation="CMD is mostly string and text based, while PowerShell works heavily with structured objects. That difference affects commands, pipelines, and scripting behavior."
+/>

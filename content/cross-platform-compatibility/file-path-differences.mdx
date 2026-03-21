@@ -1,0 +1,50 @@
+# File Path Differences
+
+## Why this matters
+
+Cross-platform CLI tools often fail on path handling before anything else. Windows, Linux, and macOS all have different expectations around separators, casing, and path behavior.
+
+## Key Concepts
+
+- Backslashes vs forward slashes
+- Relative vs absolute paths
+- Case sensitivity differences
+- Home directory assumptions
+
+## Quick Summary
+
+Path handling is one of the biggest sources of cross-platform bugs. Reliable tooling avoids hardcoded assumptions and uses platform-aware path utilities.
+
+## Quick Lab
+
+### Compare Examples
+
+<pre>
+  <code>
+{`Windows: C:\\Tools\\myapp\\config.json
+Linux:   /usr/local/bin/myapp
+macOS:   /Users/example/.config/myapp`}
+  </code>
+</pre>
+
+## What to Notice
+
+- Windows paths often include drive letters
+- Separator expectations differ
+- Case sensitivity may differ between platforms
+
+## Interview Angle
+
+Be ready to explain why path bugs happen when porting tools between Linux and Windows and how you would design around them.
+
+<Quiz
+  question="Why do file path bugs commonly appear when porting tools from Linux to Windows?"
+  options={[
+    "Because Windows never uses file paths",
+    "Because separators, drive letters, and path assumptions differ by platform",
+    "Because Linux and Windows paths are always interchangeable",
+    "Because Node.js ignores operating system differences"
+  ]}
+  answer="Because separators, drive letters, and path assumptions differ by platform"
+  explanation="Cross-platform tools often break because they assume one path format or one filesystem behavior. Windows introduces drive letters, different separators, and different path expectations."
+/>

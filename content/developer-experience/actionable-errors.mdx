@@ -1,0 +1,191 @@
+# Developer Experience (DX) — Actionable Errors & Usability
+
+## Why this matters
+
+Most tools don’t fail gracefully — they fail with:
+
+- vague errors
+- stack traces
+- no guidance
+
+This creates friction and frustration.
+
+Great tools do something different:
+
+👉 they tell the user exactly what went wrong  
+👉 and how to fix it  
+
+This is called **actionable error design**, and it is a major part of developer experience (DX).
+
+---
+
+## Key Concepts
+
+### Bad Errors
+
+```text
+Error: failed
+```
+
+This tells the user nothing.
+
+---
+
+### Better Errors
+
+```text
+Error: Could not find 'git' in PATH
+```
+
+Now we know the problem.
+
+---
+
+### Actionable Errors
+
+```text
+Error: Could not find 'git' in PATH
+
+Fix:
+- Install Git from https://git-scm.com
+- Restart your terminal after installation
+```
+
+Now the user can solve the problem immediately.
+
+---
+
+## Quick Summary
+
+An actionable error explains:
+
+1. What failed  
+2. Why it failed  
+3. How to fix it  
+
+---
+
+## Quick Lab
+
+### Step 1 — Simulate a bad error
+
+```js
+throw new Error("failed");
+```
+
+---
+
+### Step 2 — Improve it
+
+```js
+throw new Error("Git not found in PATH");
+```
+
+---
+
+### Step 3 — Make it actionable
+
+```js
+throw new Error(
+  "Git not found in PATH.\n\nFix:\n- Install Git\n- Restart your terminal"
+);
+```
+
+---
+
+## What to Notice
+
+- Clear errors reduce debugging time
+- Users don’t need external documentation
+- Good DX prevents support issues
+- Most frustration comes from unclear failures
+
+---
+
+## Real-World Example
+
+A CLI tool fails with:
+
+```text
+spawn git ENOENT
+```
+
+Most users don’t know what this means.
+
+Better version:
+
+```text
+Error: Git is not installed or not in PATH
+
+Fix:
+- Install Git
+- Restart your terminal
+```
+
+---
+
+## Debugging Strategy
+
+When designing errors:
+
+1. Ask: what would confuse the user?
+2. Translate system errors into plain language
+3. Provide concrete next steps
+4. Avoid exposing raw stack traces unless needed
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- Good DX reduces friction and improves adoption
+- Errors should be clear and actionable
+- Users should not need to search for solutions
+- Translating system errors is critical
+
+Strong answer example:
+
+“I design errors to be actionable by clearly explaining what failed and how to fix it. Instead of exposing raw system errors, I translate them into user-friendly messages with concrete next steps.”
+
+---
+
+<QuizSet
+  title="Developer Experience Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What makes an error actionable?",
+      options: [
+        "It is short",
+        "It explains the problem and how to fix it",
+        "It includes a stack trace",
+        "It uses technical language"
+      ],
+      answer: "It explains the problem and how to fix it",
+      explanation: "Actionable errors guide users toward a solution."
+    },
+    {
+      question: "Why are vague errors harmful?",
+      options: [
+        "They slow down the CPU",
+        "They confuse users and increase friction",
+        "They break the OS",
+        "They reduce memory usage"
+      ],
+      answer: "They confuse users and increase friction",
+      explanation: "Unclear errors force users to guess or search for solutions."
+    },
+    {
+      question: "What should you avoid in user-facing errors?",
+      options: [
+        "Helpful instructions",
+        "Clear explanations",
+        "Raw system errors without context",
+        "Examples"
+      ],
+      answer: "Raw system errors without context",
+      explanation: "System errors should be translated into user-friendly messages."
+    }
+  ]}
+/>

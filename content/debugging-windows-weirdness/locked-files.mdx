@@ -1,0 +1,60 @@
+# Locked Files
+
+## Why this matters
+
+Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+
+## Key Concepts
+
+- Concept one
+- Concept two
+- Concept three
+- Concept four
+
+## Quick Summary
+
+Learn why Windows file locking breaks updates, builds, and cleanup operations.
+
+## Quick Lab
+
+### In CMD
+
+<pre>
+  <code>
+{`command here`}
+  </code>
+</pre>
+
+### In PowerShell
+
+<pre>
+  <code>
+{`command here`}
+  </code>
+</pre>
+
+## What to Notice
+
+- What differs between environments
+- What debugging clues appear
+- What engineers typically misunderstand
+
+## Interview Angle
+
+Be ready to explain:
+
+• what the system is doing  
+• why the behavior differs  
+• how you would debug it in a real environment
+
+<Quiz
+  question="Why are locked files a common Windows troubleshooting issue?"
+  options={[
+    "Because Windows never allows files to be reopened",
+    "Because active processes or handles can prevent updates, deletion, or replacement",
+    "Because only Linux locks files",
+    "Because locked files only affect text editors"
+  ]}
+  answer="Because active processes or handles can prevent updates, deletion, or replacement"
+  explanation="Windows file locking can block builds, cleanup, upgrades, and service updates when a file is still being used by another process."
+/>

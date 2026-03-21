@@ -1,0 +1,68 @@
+# AI-Assisted CLI Workflows
+
+## Why this matters
+
+AI can speed up troubleshooting, scripting, and command discovery, but it can also produce commands that are incomplete, unsafe, or incorrect for your environment. In real engineering work, the important skill is not just getting a command from AI — it is validating what that command does, how it behaves in your shell, and whether it is appropriate for the system you are touching.
+
+This matters especially in CLI workflows because small mistakes can have large effects. A generated command might assume the wrong shell, wrong path syntax, wrong package manager, wrong permissions model, or wrong operating system behavior. Engineers who use AI well treat it like a fast assistant, not an infallible source of truth.
+
+## Key Concepts
+
+- AI-generated commands must be reviewed before execution
+- Shell context matters: CMD, PowerShell, Bash, and terminal hosts behave differently
+- File paths, quoting, environment variables, and permissions are common failure points
+- Good engineers validate outputs, test safely, and debug before trusting automation
+
+## Quick Summary
+
+AI is useful for CLI work, but it should be treated as a helper, not an authority. Always verify generated commands, confirm shell compatibility, and understand what a command will do before running it.
+
+## Quick Lab
+
+### In CMD
+
+<pre>
+  <code>
+{`echo %CD%
+where python
+echo %PATH%`}
+  </code>
+</pre>
+
+### In PowerShell
+
+<pre>
+  <code>
+{`Get-Location
+Get-Command python
+$env:PATH`}
+  </code>
+</pre>
+
+## What to Notice
+
+- Both environments can expose location, command resolution, and PATH, but they do so differently
+- CMD uses `%VARIABLE%` syntax, while PowerShell uses `$env:VARIABLE`
+- `where` in CMD and `Get-Command` in PowerShell may reveal different details about command resolution
+- AI often gives a command that is correct in one shell but wrong in another
+- Engineers commonly misunderstand that “works on my terminal” does not always mean “works everywhere”
+
+## Interview Angle
+
+Be ready to explain:
+
+• what the system is doing when a command is resolved  
+• why the behavior differs between shells  
+• how you would verify an AI-generated command before using it in a real environment  
+
+<Quiz
+  question="What is a good principle for using AI in CLI workflows?"
+  options={[
+    "Trust all generated commands immediately",
+    "Use AI output without validation in production",
+    "Treat AI as a helper and verify outputs before acting on them",
+    "Avoid human review entirely"
+  ]}
+  answer="Treat AI as a helper and verify outputs before acting on them"
+  explanation="AI can accelerate workflows, but commands, file operations, and automation steps still need human review and validation."
+/>

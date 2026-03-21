@@ -1,0 +1,233 @@
+# Debugging Platform-Specific Issues
+
+## Why this matters
+
+One of the hardest real-world problems:
+
+> “It works on my machine.”
+
+In real engineering, things don’t fail cleanly — they fail in confusing, inconsistent ways.
+
+A CLI tool might:
+- work on one machine but not another
+- work in PowerShell but not CMD
+- work as admin but not as a user
+- fail silently or produce unclear errors
+
+Strong engineers don’t guess — they systematically isolate the cause.
+
+---
+
+## Key Concepts
+
+- Most issues come from differences in:
+  - environment variables
+  - PATH
+  - permissions
+  - working directory
+  - shell behavior
+- Failures are often **context-dependent**
+- You must debug by isolating variables
+
+---
+
+## Quick Summary
+
+Debugging platform-specific issues means identifying differences in environment, permissions, and execution context, then narrowing down the root cause.
+
+---
+
+## Real-World Example
+
+A CLI tool fails with:
+
+```
+command not found
+```
+
+But only in VS Code — it works in PowerShell.
+
+Why?
+
+Because VS Code was launched before PATH was updated, so it inherited an outdated environment.
+
+The CLI tool inherits VS Code’s environment, and any subprocess inherits from that — causing the failure.
+
+---
+
+## Common Failure Patterns
+
+### 1. Works in one shell, not another
+
+Cause:
+- different environment variables
+- different PATH
+
+---
+
+### 2. Works as admin, not as user
+
+Cause:
+- permission (ACL) differences
+
+---
+
+### 3. Works after restarting terminal
+
+Cause:
+- environment variables not reloaded
+
+---
+
+### 4. Command not found
+
+Cause:
+- PATH missing or incorrect
+
+---
+
+### 5. Works manually, fails in script
+
+Cause:
+- subprocess environment differs from interactive shell
+
+---
+
+## Quick Lab
+
+### Step 1 — Check PATH
+
+```powershell
+$env:PATH
+```
+
+### Step 2 — Compare environments
+
+Run the same command in:
+- CMD
+- PowerShell
+- VS Code terminal
+
+---
+
+### Step 3 — Check user context
+
+```powershell
+whoami
+```
+
+---
+
+## What to Notice
+
+- Different shells can produce different results
+- PATH may not be what you expect
+- Permissions can silently block operations
+- Restarting a terminal often changes behavior
+- Parent process environment matters
+
+---
+
+## Debugging Strategy
+
+When debugging a failure, follow a consistent process:
+
+### Step 1 — Reproduce the issue
+- same command
+- same environment
+
+---
+
+### Step 2 — Check environment
+
+```js
+console.log(process.env.PATH)
+```
+
+---
+
+### Step 3 — Check permissions
+
+- try running as admin
+- inspect ACLs if needed
+
+---
+
+### Step 4 — Compare contexts
+
+- different shell
+- different terminal
+- different user
+
+---
+
+### Step 5 — Isolate variables
+
+Change one thing at a time:
+- PATH
+- shell
+- working directory
+
+---
+
+### Step 6 — Restart parent processes
+
+- terminal
+- IDE (VS Code)
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- Debugging is about isolating differences in context
+- Most issues come from environment, PATH, or permissions
+- Reproducing the issue is critical
+- Systematic elimination leads to root cause
+
+Strong answer example:
+
+“When debugging platform-specific issues, I compare environments, check PATH and permissions, and isolate variables. I reproduce the issue consistently and narrow down what differs between working and failing cases.”
+
+---
+
+<QuizSet
+  title="Debugging Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the first step in debugging an issue?",
+      options: [
+        "Reinstall the OS",
+        "Reproduce the issue reliably",
+        "Delete files",
+        "Change permissions randomly"
+      ],
+      answer: "Reproduce the issue reliably",
+      explanation: "You must reliably reproduce an issue before diagnosing it."
+    },
+    {
+      question: "What is a common cause of 'command not found'?",
+      options: [
+        "Network errors",
+        "PATH misconfiguration",
+        "Registry corruption",
+        "Low memory"
+      ],
+      answer: "PATH misconfiguration",
+      explanation: "If PATH does not include the executable location, commands cannot be found."
+    },
+    {
+      question: "Why is isolating variables important?",
+      options: [
+        "To speed up the CPU",
+        "To identify the exact cause of failure",
+        "To reduce memory usage",
+        "To modify the registry"
+      ],
+      answer: "To identify the exact cause of failure",
+      explanation: "Changing one variable at a time helps pinpoint the root cause."
+    }
+  ]}
+/>

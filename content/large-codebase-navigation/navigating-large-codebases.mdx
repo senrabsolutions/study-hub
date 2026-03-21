@@ -1,0 +1,205 @@
+# Navigating Large Codebases
+
+## Why this matters
+
+In real engineering work, you are rarely starting from scratch.
+
+Instead, you are:
+- dropped into a large, unfamiliar codebase
+- asked to fix a bug or add a feature
+- expected to understand how things work quickly
+
+If you don’t know how to navigate codebases, you will feel lost.
+
+---
+
+## Key Concepts
+
+### 1. Entry Points
+
+Start by finding:
+- main files (`index.ts`, `main.ts`, `cli.ts`)
+- command entry logic
+- configuration loaders
+
+These tell you **where execution begins**.
+
+---
+
+### 2. Follow the Flow
+
+Trace execution step-by-step:
+
+- input → parsing → logic → output
+
+Look for:
+- argument parsing
+- command handlers
+- subprocess calls
+
+---
+
+### 3. Search Strategically
+
+Use search instead of reading everything:
+
+Search for:
+- command names
+- error messages
+- function names
+
+Example:
+
+```bash
+grep -r "spawn" .
+```
+
+---
+
+### 4. Identify Key Layers
+
+Most CLI tools have:
+
+- CLI interface (argument parsing)
+- core logic
+- system interaction (filesystem, subprocesses)
+- output layer
+
+---
+
+### 5. Read Error Paths
+
+Errors often reveal structure:
+
+- where failures happen
+- how code is organized
+- what assumptions exist
+
+---
+
+## Quick Summary
+
+Navigating large codebases is about finding entry points, following execution flow, and using targeted search instead of reading everything.
+
+---
+
+## Quick Lab
+
+### Step 1 — Find entry file
+
+Look for:
+
+- `package.json` → `"bin"` field
+- main script file
+
+---
+
+### Step 2 — Trace execution
+
+Follow:
+
+```text
+CLI → argument parsing → handler → output
+```
+
+---
+
+### Step 3 — Search for behavior
+
+Search for:
+
+- specific commands
+- error messages
+
+---
+
+## What to Notice
+
+- You don’t need to read everything
+- Structure repeats across projects
+- Entry points and flow are key
+- Search is your primary tool
+
+---
+
+## Real-World Example
+
+You need to debug:
+
+> “CLI tool fails when running a command”
+
+Steps:
+
+1. Find CLI entry point
+2. Locate command handler
+3. Trace logic to subprocess call
+4. inspect environment handling
+
+---
+
+## Debugging Strategy
+
+When working in unfamiliar code:
+
+1. Start at entry point
+2. Follow execution path
+3. Add logs if needed
+4. Use search heavily
+5. Focus on relevant paths only
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- You start at entry points
+- You trace execution flow
+- You use search instead of reading everything
+- You isolate relevant parts of the code
+
+Strong answer example:
+
+“When navigating a large codebase, I start at the entry point, follow the execution flow, and use targeted search to find relevant logic. I avoid reading everything and instead focus on the parts related to the task.”
+
+---
+
+<QuizSet
+  title="Codebase Navigation Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the best starting point in a large codebase?",
+      options: [
+        "Random files",
+        "Entry points like main or CLI files",
+        "Config files only",
+        "The largest file"
+      ],
+      answer: "Entry points like main or CLI files",
+      explanation: "Entry points show where execution begins."
+    },
+    {
+      question: "What is the most effective way to explore a codebase?",
+      options: [
+        "Read every file",
+        "Use targeted search and follow execution flow",
+        "Delete unused code",
+        "Run random commands"
+      ],
+      answer: "Use targeted search and follow execution flow",
+      explanation: "Strategic navigation is more effective than reading everything."
+    },
+    {
+      question: "Why are error paths useful?",
+      options: [
+        "They slow execution",
+        "They reveal where failures occur and how code is structured",
+        "They reduce memory usage",
+        "They replace documentation"
+      ],
+      answer: "They reveal where failures occur and how code is structured",
+      explanation: "Errors often expose important parts of the code."
+    }
+  ]}
+/>

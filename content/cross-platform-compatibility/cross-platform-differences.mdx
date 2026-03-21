@@ -1,0 +1,278 @@
+# Cross-Platform Differences (Windows vs Linux/macOS)
+
+## Why this matters
+
+A very common real-world issue:
+
+> “This script works on Mac… but breaks on Windows.”
+
+CLI tools often work perfectly on one platform and fail on another.
+
+Common issues include:
+
+- file paths breaking
+- commands not being found
+- scripts failing due to syntax differences
+- newline inconsistencies
+
+If you don’t account for platform differences, your tool will be unreliable.
+
+---
+
+## Key Concepts
+
+### 1. File Paths
+
+- Windows uses:
+```
+C:\Users\name\file.txt
+```
+
+- Linux/macOS use:
+```
+/home/name/file.txt
+```
+
+- Path separators differ:
+  - Windows → `\`
+  - Unix → `/`
+
+---
+
+### 2. Shell Differences
+
+- Windows:
+  - CMD
+  - PowerShell
+
+- Unix:
+  - bash
+  - zsh
+
+Each shell has:
+- different syntax
+- different quoting rules
+- different built-in commands
+
+---
+
+### 3. Environment Variables
+
+- Windows:
+```bat
+echo %PATH%
+```
+
+```powershell
+$env:PATH
+```
+
+- Unix:
+```bash
+echo $PATH
+```
+
+---
+
+### 4. Newline Differences
+
+- Windows → CRLF (`\r\n`)
+- Unix → LF (`\n`)
+
+This can break:
+- scripts
+- parsing
+- version control
+
+---
+
+### 5. Executables
+
+- Windows uses extensions:
+  - `.exe`, `.bat`, `.cmd`
+
+- Unix uses:
+  - executable permissions (`chmod +x`)
+
+---
+
+## Quick Summary
+
+Different platforms handle paths, shells, environment variables, and execution differently. CLI tools must account for these differences to work reliably.
+
+---
+
+## Real-World Scenario
+
+A script includes:
+
+```bash
+rm -rf dist
+```
+
+Works on macOS/Linux.
+
+Fails on Windows with:
+
+```
+'rm' is not recognized as an internal or external command
+```
+
+---
+
+## Why This Happens
+
+- `rm` is a Unix command, not native to Windows  
+- the script assumes a Unix shell environment  
+- Windows shells (CMD/PowerShell) do not support the same commands  
+
+Result:
+👉 the script is not portable
+
+---
+
+## Quick Lab
+
+### Step 1 — Print current platform in Node
+
+```bash
+node -e "console.log(process.platform)"
+```
+
+---
+
+### Step 2 — Handle paths correctly
+
+```js
+const path = require("path");
+
+console.log(path.join("folder", "file.txt"));
+```
+
+---
+
+### Step 3 — Test shell differences
+
+Try running:
+
+```bash
+rm -rf test-folder
+```
+
+Then try equivalent in PowerShell:
+
+```powershell
+Remove-Item -Recurse -Force test-folder
+```
+
+---
+
+## What to Notice
+
+- Hardcoded paths lead to bugs  
+- Shell-specific commands may not work everywhere  
+- Environment variable syntax differs  
+- Cross-platform tools must normalize behavior  
+- Assumptions about the OS are a major source of failure  
+
+---
+
+## Deep Dive (Important)
+
+Most cross-platform failures come from **implicit assumptions**:
+
+- assuming a Unix shell (`rm`, `grep`, etc.)
+- assuming path format (`/` vs `\`)
+- assuming environment variable syntax  
+- assuming executable behavior  
+
+Good tools avoid assumptions and use abstractions.
+
+---
+
+## Debugging Strategy
+
+When something breaks cross-platform:
+
+### 1. Identify platform differences
+- Windows vs Linux/macOS  
+
+---
+
+### 2. Check path handling
+- avoid hardcoding  
+- use platform-aware libraries  
+
+---
+
+### 3. Check shell-specific commands
+- replace with cross-platform alternatives  
+
+---
+
+### 4. Normalize environment handling
+- consistent variable usage  
+
+---
+
+### 5. Use platform-aware tools
+
+Examples:
+- Node `path` module  
+- cross-platform CLI utilities  
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- Platforms differ in paths, shells, and execution models  
+- Hardcoded assumptions break cross-platform tools  
+- Portability requires abstraction and normalization  
+
+Strong answer example:
+
+“When building cross-platform CLI tools, I avoid shell-specific assumptions and use platform-aware abstractions for paths and environment handling. Most issues come from differences in shell behavior or path formats.”
+
+---
+
+<QuizSet
+  title="Cross-Platform Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is a key difference in file paths between Windows and Unix?",
+      options: [
+        "They use the same format",
+        "Windows uses backslashes, Unix uses forward slashes",
+        "Unix uses drive letters",
+        "Windows does not support paths"
+      ],
+      answer: "Windows uses backslashes, Unix uses forward slashes",
+      explanation: "Path separators differ between platforms."
+    },
+    {
+      question: "Why do some scripts fail on Windows but work on macOS/Linux?",
+      options: [
+        "Because Windows is slower",
+        "Because commands and shell behavior differ",
+        "Because Node does not work on Windows",
+        "Because PATH does not exist on Windows"
+      ],
+      answer: "Because commands and shell behavior differ",
+      explanation: "Shell differences often cause script incompatibility."
+    },
+    {
+      question: "How should you handle paths in cross-platform Node apps?",
+      options: [
+        "Hardcode slashes",
+        "Use the path module",
+        "Avoid file paths",
+        "Only support Windows"
+      ],
+      answer: "Use the path module",
+      explanation: "The path module ensures compatibility across platforms."
+    }
+  ]}
+/>
