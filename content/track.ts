@@ -10,6 +10,7 @@ export const trackOrder = [
   "typescript-node-cli",
   "ai-tooling-cli-workflows",
   "certificates-and-tls",
+  "anthropic",
 ] as const;
 
 export type TrackKey = (typeof trackOrder)[number];
