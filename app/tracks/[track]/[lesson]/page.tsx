@@ -3,9 +3,9 @@ import path from "path";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isValidTrack } from "@/content/track";
+import LessonContent from "@/components/LessonContent";
 import LessonProgressButton from "@/components/LessonProgressButton";
 import TrackSidebar from "@/components/TrackSidebar";
-import { getLessonComponent } from "@/lib/lesson-components";
 import {
   getLessonNavigation,
   getLessonsByTrack,
@@ -47,12 +47,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
     getLessonsByTrack(track),
   ]);
 
-  const Lesson = getLessonComponent(track, lesson);
-
-  if (!Lesson) {
-    notFound();
-  }
-
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
       <div className="mb-5 text-sm text-gray-600 dark:text-gray-400 sm:mb-6">
@@ -76,7 +70,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
           </div>
 
           <article className="prose max-w-none rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 lg:p-8 dark:prose-invert dark:border-gray-800 dark:bg-gray-950 dark:shadow-none">
-            <Lesson />
+            <LessonContent track={track} lesson={lesson} />
           </article>
 
           <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap sm:justify-between">
