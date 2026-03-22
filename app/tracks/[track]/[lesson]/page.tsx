@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { isValidTrack } from "@/content/track";
 import LessonProgressButton from "@/components/LessonProgressButton";
 import TrackSidebar from "@/components/TrackSidebar";
+import { getLessonComponent } from "@/lib/lesson-components";
 import {
   getLessonNavigation,
   getLessonsByTrack,
@@ -35,7 +36,6 @@ export default async function LessonPage({ params }: LessonPageProps) {
   }
 
   const trackInfo = await getTrackInfo(track);
-
   const mdxPath = path.join(process.cwd(), "content", track, `${lesson}.mdx`);
 
   if (!(await fileExists(mdxPath))) {
@@ -47,9 +47,11 @@ export default async function LessonPage({ params }: LessonPageProps) {
     getLessonsByTrack(track),
   ]);
 
-  const Lesson = (
-    await import(`../../../../content/${track}/${lesson}.mdx`)
-  ).default;
+  const Lesson = getLessonComponent(track, lesson);
+
+  if (!Lesson) {
+    notFound();
+  }
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
