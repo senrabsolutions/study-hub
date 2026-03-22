@@ -47,9 +47,6 @@ const lessonMap = {
   "powershell-automation/execution-policies": dynamic(
     () => import("@/content/powershell-automation/execution-policies.mdx")
   ),
-  "powershell-automation/execution-policy": dynamic(
-    () => import("@/content/powershell-automation/execution-policy.mdx")
-  ),
   "powershell-automation/powershell-pipeline-behavior": dynamic(
     () =>
       import("@/content/powershell-automation/powershell-pipeline-behavior.mdx")
@@ -150,6 +147,23 @@ const lessonMap = {
   ),
   "anthropic/interview-process": dynamic(
     () => import("@/content/anthropic/interview-process.mdx")
+  ),
+
+  "macos-for-windows-admins/macos-shell-and-environment": dynamic(
+    () =>
+      import("@/content/macos-for-windows-admins/macos-shell-and-environment.mdx")
+  ),
+  "macos-for-windows-admins/macos-process-and-system": dynamic(
+    () =>
+      import("@/content/macos-for-windows-admins/macos-process-and-system.mdx")
+  ),
+  "macos-for-windows-admins/macos-permissions-and-security": dynamic(
+    () =>
+      import("@/content/macos-for-windows-admins/macos-permissions-and-security.mdx")
+  ),
+  "macos-for-windows-admins/macos-developer-tools": dynamic(
+    () =>
+      import("@/content/macos-for-windows-admins/macos-developer-tools.mdx")
   ),
 } as const;
 
