@@ -2,7 +2,7 @@
 
 ## Why this matters
 
-Claude Code is a TypeScript CLI tool built on Node.js. When you work on it, you are working directly in this stack. Understanding how Node CLI tools are structured — how they read arguments, handle stdin/stdout, manage exit codes, and get packaged — is foundational to this role.
+Claude Code is a TypeScript CLI tool built on Node.js. When you work on it, you are working directly in this stack. Understanding how Node CLI tools are structured -- how they read arguments, handle stdin/stdout, manage exit codes, and get packaged -- is foundational to this role.
 
 This is not abstract. Every bug you fix, every feature you ship, every Windows compatibility issue you diagnose will happen inside a codebase that works exactly like what this lesson covers.
 
@@ -13,7 +13,7 @@ This is not abstract. Every bug you fix, every feature you ship, every Windows c
 - A CLI is a Node.js program that reads from `process.argv` and writes to `process.stdout` / `process.stderr`
 - Entry points are defined in `package.json` under `bin`
 - Exit codes communicate success or failure to the calling process
-- stdin/stdout/stderr are streams — understanding them matters for piping and automation
+- stdin/stdout/stderr are streams -- understanding them matters for piping and automation
 
 ---
 
@@ -32,7 +32,7 @@ console.log("Arguments:", args);
 ```
 
 The `#!/usr/bin/env node` shebang tells Unix-like systems to run this with Node.
-On Windows, this line is ignored — Node is invoked via the `.cmd` wrapper that npm creates.
+On Windows, this line is ignored -- Node is invoked via the `.cmd` wrapper that npm creates.
 
 ---
 
@@ -53,9 +53,9 @@ In `package.json`:
 When installed globally (`npm install -g`) or locally and run via `npx`, npm creates a wrapper script that puts `my-tool` on PATH.
 
 On Windows specifically, npm creates **three files**:
-- `my-tool` — shell script for Git Bash / WSL
-- `my-tool.cmd` — batch file for CMD
-- `my-tool.ps1` — PowerShell script
+- `my-tool` -- shell script for Git Bash / WSL
+- `my-tool.cmd` -- batch file for CMD
+- `my-tool.ps1` -- PowerShell script
 
 This is why Windows PATH and shell compatibility issues are so common with CLI tools.
 
@@ -90,11 +90,11 @@ if ($LASTEXITCODE -ne 0) {
 ### stdout vs stderr
 
 ```typescript
-// stdout — for output the user or calling process actually needs
+// stdout -- for output the user or calling process actually needs
 process.stdout.write("result data\n");
 console.log("result data"); // same thing
 
-// stderr — for errors, warnings, diagnostic messages
+// stderr -- for errors, warnings, diagnostic messages
 process.stderr.write("Error: something failed\n");
 console.error("Error: something failed"); // same thing
 ```
@@ -144,13 +144,13 @@ my-tool/
 
 ## Quick Lab
 
-### Step 1 — Check how Node sees arguments
+### Step 1 -- Check how Node sees arguments
 
 ```powershell
 node -e "console.log(process.argv)"
 ```
 
-### Step 2 — Check exit code behavior in PowerShell
+### Step 2 -- Check exit code behavior in PowerShell
 
 ```powershell
 node -e "process.exit(1)"
@@ -160,7 +160,7 @@ node -e "process.exit(0)"
 echo $LASTEXITCODE   # should print 0
 ```
 
-### Step 3 — See npm bin wrappers on Windows
+### Step 3 -- See npm bin wrappers on Windows
 
 ```powershell
 # After installing a global package:
@@ -172,10 +172,10 @@ Get-ChildItem "$env:APPDATA\npm" | Where-Object { $_.Name -like "npx*" }
 
 ## What to Notice
 
-- On Windows, npm creates `.cmd` wrappers — the shebang line in your script is irrelevant to CMD/PowerShell
-- Exit codes matter for automation — tools that always exit 0 break CI pipelines
+- On Windows, npm creates `.cmd` wrappers -- the shebang line in your script is irrelevant to CMD/PowerShell
+- Exit codes matter for automation -- tools that always exit 0 break CI pipelines
 - stdout is for data, stderr is for everything else
-- TypeScript needs a build step — your `bin` should point to `dist/`, not `src/`
+- TypeScript needs a build step -- your `bin` should point to `dist/`, not `src/`
 
 ---
 

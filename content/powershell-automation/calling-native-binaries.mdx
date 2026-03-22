@@ -6,7 +6,7 @@ One of the most frustrating real-world issues:
 
 > “This command works in bash… but breaks in PowerShell.”
 
-PowerShell is not just another shell — it behaves differently when calling native tools.
+PowerShell is not just another shell -- it behaves differently when calling native tools.
 
 This leads to:
 
@@ -83,7 +83,7 @@ Result:
 
 ## Quick Lab
 
-### Step 1 — Inspect arguments in Node
+### Step 1 -- Inspect arguments in Node
 
 ```powershell
 node -e "console.log(process.argv)" hello "world test"
@@ -91,7 +91,7 @@ node -e "console.log(process.argv)" hello "world test"
 
 ---
 
-### Step 2 — Try different quoting styles
+### Step 2 -- Try different quoting styles
 
 ```powershell
 node -e "console.log(process.argv)" "hello world"
@@ -99,7 +99,7 @@ node -e "console.log(process.argv)" "hello world"
 
 ---
 
-### Step 3 — Compare with CMD or bash
+### Step 3 -- Compare with CMD or bash
 
 Run the same commands and compare output.
 
@@ -149,7 +149,7 @@ Result:
 
 When commands behave differently in PowerShell:
 
-### Step 1 — Inspect arguments
+### Step 1 -- Inspect arguments
 
 ```js
 console.log(process.argv)
@@ -157,25 +157,25 @@ console.log(process.argv)
 
 ---
 
-### Step 2 — Simplify command
+### Step 2 -- Simplify command
 Remove quotes, reduce complexity
 
 ---
 
-### Step 3 — Try alternate quoting
+### Step 3 -- Try alternate quoting
 - double quotes
 - single quotes
 
 ---
 
-### Step 4 — Compare shells
+### Step 4 -- Compare shells
 - CMD  
 - PowerShell  
 - bash  
 
 ---
 
-### Step 5 — Check for escaping issues
+### Step 5 -- Check for escaping issues
 
 ---
 

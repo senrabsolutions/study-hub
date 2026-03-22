@@ -4,7 +4,7 @@
 
 Raw `process.argv` parsing gets unmanageable fast. Real CLI tools need subcommands, flags, validation, help text, and version output. CLI frameworks handle all of that so you can focus on what your commands actually do.
 
-Claude Code is a complex CLI with multiple subcommands and options. Understanding how frameworks like these work — how they parse arguments, generate help, handle errors — is essential for working in that codebase.
+Claude Code is a complex CLI with multiple subcommands and options. Understanding how frameworks like these work -- how they parse arguments, generate help, handle errors -- is essential for working in that codebase.
 
 ---
 
@@ -158,17 +158,17 @@ The framework:
 **Shell quoting differences matter here.** CMD, PowerShell, and bash handle quoting differently, and this affects how arguments reach your parser.
 
 ```powershell
-# PowerShell — this works as expected
+# PowerShell -- this works as expected
 my-tool run "my file.ts" --message "hello world"
 
-# CMD — double quotes work
+# CMD -- double quotes work
 my-tool run "my file.ts" --message "hello world"
 
-# PowerShell with special characters — can require escaping
+# PowerShell with special characters -- can require escaping
 my-tool run file.ts --filter "*.ts"  # glob may be expanded by shell
 ```
 
-When debugging argument issues on Windows, always check what `process.argv` actually contains — the shell may have transformed the input before Node sees it.
+When debugging argument issues on Windows, always check what `process.argv` actually contains -- the shell may have transformed the input before Node sees it.
 
 ```typescript
 // Add this temporarily to debug
@@ -179,7 +179,7 @@ console.log("Raw args:", process.argv.slice(2));
 
 ## Quick Lab
 
-### Step 1 — Install Commander and try it
+### Step 1 -- Install Commander and try it
 
 ```powershell
 mkdir cli-test
@@ -210,7 +210,7 @@ node index.js hello world --shout
 node index.js --help
 ```
 
-### Step 2 — Inspect raw argv
+### Step 2 -- Inspect raw argv
 
 ```powershell
 node -e "console.log(process.argv)" -- --flag value "spaced arg"
@@ -220,9 +220,9 @@ node -e "console.log(process.argv)" -- --flag value "spaced arg"
 
 ## What to Notice
 
-- `--help` output is generated automatically — the framework reads your command definitions
+- `--help` output is generated automatically -- the framework reads your command definitions
 - Positional args and flags are handled differently under the hood
-- Windows shells can mangle arguments before Node sees them — always check raw `process.argv` when debugging
+- Windows shells can mangle arguments before Node sees them -- always check raw `process.argv` when debugging
 - The framework you're working with shapes how the entire codebase is organized
 
 ---
@@ -238,7 +238,7 @@ Be ready to explain:
 
 Strong answer:
 
-*"I'd reach for Commander for most tools — it's simple, well-typed, and widely understood. For something the size of Claude Code with plugins and extensions, Oclif's structure makes more sense. The important thing to understand is that all these frameworks are ultimately parsing process.argv, so when something breaks on Windows, the first thing I check is what the shell actually passed in."*
+*"I'd reach for Commander for most tools -- it's simple, well-typed, and widely understood. For something the size of Claude Code with plugins and extensions, Oclif's structure makes more sense. The important thing to understand is that all these frameworks are ultimately parsing process.argv, so when something breaks on Windows, the first thing I check is what the shell actually passed in."*
 
 ---
 
@@ -255,7 +255,7 @@ Strong answer:
         "stdin exclusively"
       ],
       answer: "process.argv",
-      explanation: "All CLI frameworks are built on top of process.argv — they just provide structure, validation, and help generation around it."
+      explanation: "All CLI frameworks are built on top of process.argv -- they just provide structure, validation, and help generation around it."
     },
     {
       question: "Why might arguments behave differently on Windows vs Linux?",

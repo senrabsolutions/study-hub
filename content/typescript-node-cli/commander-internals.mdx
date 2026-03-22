@@ -5,7 +5,7 @@
 Claude Code is a TypeScript CLI. Whether it uses Commander directly or a similar
 parsing approach, understanding how argument parsing works at the mechanical level
 means you can debug failures that look like Claude Code bugs but are actually
-shell or parsing behavior — and you can explain that distinction clearly to users
+shell or parsing behavior -- and you can explain that distinction clearly to users
 and teammates.
 
 When a Windows user reports "Claude Code ignores my flag" or "my argument with
@@ -17,7 +17,7 @@ spaces breaks the command," the answer almost always lives here.
 
 - Argument parsing is a transformation of a flat string array into a structured object
 - The shell performs its own transformations before Node ever sees the input
-- Commander's parsing pipeline has distinct phases — each can fail independently
+- Commander's parsing pipeline has distinct phases -- each can fail independently
 - Understanding the pipeline tells you exactly where to look when something breaks
 
 ---
@@ -49,13 +49,13 @@ This is where most Windows-specific argument bugs originate.
 
 **PowerShell quoting:**
 ```powershell
-# Double quotes — preserved as single argument
+# Double quotes -- preserved as single argument
 claude run "my file.ts"       # argv: ['my file.ts']
 
-# Single quotes — literal in PowerShell (unlike bash)
+# Single quotes -- literal in PowerShell (unlike bash)
 claude run 'my file.ts'       # argv: ['my file.ts']
 
-# No quotes — spaces split into separate arguments
+# No quotes -- spaces split into separate arguments
 claude run my file.ts         # argv: ['my', 'file.ts']  ← WRONG
 ```
 
@@ -64,7 +64,7 @@ claude run my file.ts         # argv: ['my', 'file.ts']  ← WRONG
 :: Double quotes work
 claude run "my file.ts"       :: argv: ['my file.ts']
 
-:: Single quotes are LITERAL in CMD — not string delimiters
+:: Single quotes are LITERAL in CMD -- not string delimiters
 claude run 'my file.ts'       :: argv: ["'my", "file.ts'"]  ← WRONG
 ```
 
@@ -75,13 +75,13 @@ console.log("Raw argv:", process.argv.slice(2));
 process.exit(0);
 ```
 
-This tells you exactly what the shell passed to Node — before Commander touches it.
+This tells you exactly what the shell passed to Node -- before Commander touches it.
 
 ---
 
 ## Stage 2: Commander's tokenizer
 
-Commander receives `process.argv.slice(2)` — the raw array after stripping
+Commander receives `process.argv.slice(2)` -- the raw array after stripping
 `node` and the script path.
 
 It then walks the array left to right, classifying each token:
@@ -94,7 +94,7 @@ Token classification rules (simplified):
   otherwise  →  positional argument or subcommand name
 ```
 
-**Combined short flags — a common confusion:**
+**Combined short flags -- a common confusion:**
 ```
 -abc  →  Commander splits into -a -b -c
 -v3   →  Commander reads as -v with value '3' (if -v takes a value)
@@ -112,9 +112,9 @@ Commander uses your `.option()` calls to understand what to expect:
 
 ```typescript
 program
-  .option('-v, --verbose',          'boolean flag — no value expected')
-  .option('-t, --timeout <ms>',     'required value — next token consumed')
-  .option('-o, --output [file]',    'optional value — next token consumed if not a flag')
+  .option('-v, --verbose',          'boolean flag -- no value expected')
+  .option('-t, --timeout <ms>',     'required value -- next token consumed')
+  .option('-o, --output [file]',    'optional value -- next token consumed if not a flag')
   .option('-n, --count <n>',        'number', parseInt)  // with coercion function
   .option('--tag <t>',              'repeatable', collect, [])  // custom collector
 ```
@@ -159,13 +159,13 @@ errors when users expect parent-level flags to work everywhere.
 
 ---
 
-## Where Commander fails on Windows — the real cases
+## Where Commander fails on Windows -- the real cases
 
 ### Case 1: Glob expansion
 
 ```powershell
 # PowerShell does NOT expand globs automatically (unlike bash)
-claude run *.ts     # argv: ['*.ts'] — literal string, not expanded
+claude run *.ts     # argv: ['*.ts'] -- literal string, not expanded
 
 # Bash DOES expand globs
 claude run *.ts     # argv: ['file1.ts', 'file2.ts', 'file3.ts']
@@ -196,7 +196,7 @@ arrives as the right type.
 
 ## Quick Lab
 
-### Step 1 — See Commander's token classification
+### Step 1 -- See Commander's token classification
 
 ```javascript
 // commander-debug.js
@@ -222,7 +222,7 @@ node commander-debug.js run "my file.ts" --timeout=5000
 node commander-debug.js run myfile.ts -vt 3000   # combined short flags
 ```
 
-### Step 2 — Trigger an optional vs required value difference
+### Step 2 -- Trigger an optional vs required value difference
 
 ```javascript
 program.option('--output [file]', 'optional output');
@@ -238,11 +238,11 @@ node commander-debug.js run file.ts --name      # should error
 
 ## What to Notice
 
-- The shell transforms input before Commander sees it — most Windows argument
+- The shell transforms input before Commander sees it -- most Windows argument
   bugs happen here, not in Commander itself
 - `process.argv` logging is the fastest diagnostic tool you have
 - Boolean flags vs value-taking flags change how subsequent tokens are classified
-- Subcommand options are isolated — parent options don't bleed through by default
+- Subcommand options are isolated -- parent options don't bleed through by default
 
 ---
 
@@ -258,7 +258,7 @@ Be ready to explain:
 Strong answer:
 
 *"When an argument seems to be ignored or misinterpreted on Windows, the first
-thing I check is what process.argv actually contains — before Commander touches
+thing I check is what process.argv actually contains -- before Commander touches
 it. Most Windows argument bugs happen at the shell stage, not in the parser.
 PowerShell and CMD handle quoting differently, and neither expands globs the
 way bash does. Once I can see the raw argv, I can tell immediately whether
@@ -290,7 +290,7 @@ the problem is the shell, Commander's tokenizer, or the option definition."*
         "Check the Windows registry"
       ],
       answer: "Log process.argv.slice(2) before Commander parses it",
-      explanation: "Logging the raw argv array shows you exactly what the shell passed to Node — before any framework processing. This immediately tells you whether the bug is in the shell stage or the parsing stage."
+      explanation: "Logging the raw argv array shows you exactly what the shell passed to Node -- before any framework processing. This immediately tells you whether the bug is in the shell stage or the parsing stage."
     },
     {
       question: "Why is changing a boolean flag to a value-taking flag a breaking change?",

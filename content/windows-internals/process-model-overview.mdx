@@ -41,19 +41,19 @@ All programs run as processes. When one process launches another, the child inhe
 
 ## Quick Lab
 
-### Step 1 — View running processes
+### Step 1 -- View running processes
 
 ```powershell
 Get-Process | Select-Object -First 5
 ```
 
-### Step 2 — Launch a child process
+### Step 2 -- Launch a child process
 
 ```powershell
 Start-Process notepad
 ```
 
-### Step 3 — Spawn a process from Node
+### Step 3 -- Spawn a process from Node
 
 ```bash
 node -e "require('child_process').exec('notepad')"
@@ -78,7 +78,7 @@ A Node CLI tool runs a subprocess:
 git clone ...
 ```
 
-If Git fails, it might not be Git itself — it could be:
+If Git fails, it might not be Git itself -- it could be:
 
 - missing PATH in the parent process
 - incorrect working directory

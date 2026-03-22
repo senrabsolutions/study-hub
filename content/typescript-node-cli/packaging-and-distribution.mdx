@@ -2,7 +2,7 @@
 
 ## Why this matters
 
-A CLI that works on your machine but fails to install cleanly on someone else's Windows box is a broken CLI. Distribution is where most Windows-specific problems surface — PATH conflicts, missing wrappers, permission errors, antivirus interference, and package manager quirks.
+A CLI that works on your machine but fails to install cleanly on someone else's Windows box is a broken CLI. Distribution is where most Windows-specific problems surface -- PATH conflicts, missing wrappers, permission errors, antivirus interference, and package manager quirks.
 
 This is one of the core responsibilities of the Claude Code Windows role: ensuring installation is smooth and reliable across different Windows environments.
 
@@ -182,14 +182,14 @@ Chocolatey packages are NuSpec manifests with PowerShell install scripts. Enterp
 
 ## Quick Lab
 
-### Step 1 — Check where global npm tools land
+### Step 1 -- Check where global npm tools land
 
 ```powershell
 npm config get prefix
 Get-ChildItem "$(npm config get prefix)"
 ```
 
-### Step 2 — Find all copies of a command on PATH
+### Step 2 -- Find all copies of a command on PATH
 
 ```powershell
 where.exe node
@@ -197,7 +197,7 @@ where.exe npm
 # where.exe shows ALL matches in PATH order, not just the first
 ```
 
-### Step 3 — Inspect a .ps1 wrapper
+### Step 3 -- Inspect a .ps1 wrapper
 
 ```powershell
 Get-Content "$(npm config get prefix)\npx.ps1"
@@ -207,9 +207,9 @@ Get-Content "$(npm config get prefix)\npx.ps1"
 
 ## What to Notice
 
-- npm creates three wrapper files on Windows — each for a different shell context
+- npm creates three wrapper files on Windows -- each for a different shell context
 - PATH order determines which version of a tool runs when duplicates exist
-- PowerShell execution policy blocks `.ps1` wrappers — a common gotcha for end users
+- PowerShell execution policy blocks `.ps1` wrappers -- a common gotcha for end users
 - Enterprise environments add extra constraints (AV, signing, internal package feeds)
 
 ---
@@ -225,7 +225,7 @@ Be ready to explain:
 
 Strong answer:
 
-*"When npm installs a CLI globally on Windows, it creates .cmd and .ps1 wrappers so the tool works in both CMD and PowerShell. The most common issues I see are PATH not including the npm bin directory, and PowerShell execution policy blocking the .ps1 wrapper. Both are diagnosable quickly — check npm config get prefix against $env:PATH, and check Get-ExecutionPolicy."*
+*"When npm installs a CLI globally on Windows, it creates .cmd and .ps1 wrappers so the tool works in both CMD and PowerShell. The most common issues I see are PATH not including the npm bin directory, and PowerShell execution policy blocking the .ps1 wrapper. Both are diagnosable quickly -- check npm config get prefix against $env:PATH, and check Get-ExecutionPolicy."*
 
 ---
 

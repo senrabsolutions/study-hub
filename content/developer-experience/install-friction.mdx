@@ -2,7 +2,7 @@
 
 ## Why this matters
 
-The install experience is the first thing a user encounters. On Windows, it is also where the most can go wrong — PATH issues, missing prerequisites, permission errors, antivirus interference, and shell compatibility problems all surface at install time.
+The install experience is the first thing a user encounters. On Windows, it is also where the most can go wrong -- PATH issues, missing prerequisites, permission errors, antivirus interference, and shell compatibility problems all surface at install time.
 
 A tool that installs cleanly and works immediately earns trust. A tool that requires troubleshooting to install loses users before they've seen what it does. For Claude Code, the Windows install experience is a direct reflection of how much the team cares about Windows developers.
 
@@ -84,10 +84,10 @@ Windows has two permission contexts: standard user and administrator. Many tools
 **Good design:** install to user-scoped locations that don't require admin.
 
 ```powershell
-# User-scoped install — no admin required
+# User-scoped install -- no admin required
 npm install -g my-tool        # installs to %APPDATA%\npm
 
-# System-scoped install — requires admin
+# System-scoped install -- requires admin
 # Avoid this unless there's a strong reason
 ```
 
@@ -182,7 +182,7 @@ To fix this, add the npm bin directory to your PATH:
 
 ## Quick Lab
 
-### Step 1 — Measure install friction of an existing tool
+### Step 1 -- Measure install friction of an existing tool
 
 ```powershell
 # Time how long a clean install takes and what steps are required
@@ -192,7 +192,7 @@ Measure-Command { npm install -g typescript }
 where.exe tsc
 ```
 
-### Step 2 — Simulate a PATH problem
+### Step 2 -- Simulate a PATH problem
 
 ```powershell
 # Temporarily remove npm bin from PATH
@@ -206,7 +206,7 @@ tsc --version  # Should fail
 $env:PATH = $original
 ```
 
-### Step 3 — Check if a tool detects non-interactive mode
+### Step 3 -- Check if a tool detects non-interactive mode
 
 ```powershell
 # Pipe stdin to force non-interactive
@@ -235,7 +235,7 @@ Be ready to explain:
 
 Strong answer:
 
-*"Install friction on Windows comes from four places: missing prerequisites, PATH not including the install location, permissions requiring admin when they shouldn't, and shell compatibility. The best tools handle all of these by detecting the problem and telling the user exactly what to do — not just printing a stack trace. PATH is the most common one I see: the install succeeds, but the user's shell session doesn't know about it yet."*
+*"Install friction on Windows comes from four places: missing prerequisites, PATH not including the install location, permissions requiring admin when they shouldn't, and shell compatibility. The best tools handle all of these by detecting the problem and telling the user exactly what to do -- not just printing a stack trace. PATH is the most common one I see: the install succeeds, but the user's shell session doesn't know about it yet."*
 
 ---
 

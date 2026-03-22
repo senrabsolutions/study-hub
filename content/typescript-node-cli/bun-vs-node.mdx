@@ -2,7 +2,7 @@
 
 ## Why this matters
 
-Claude Code's documentation references Bun as a supported runtime alongside Node.js. Anthropic is actively interested in Bun for CLI tooling — faster startup, native TypeScript support, and a different subprocess model all have direct implications for a tool used by developers all day long.
+Claude Code's documentation references Bun as a supported runtime alongside Node.js. Anthropic is actively interested in Bun for CLI tooling -- faster startup, native TypeScript support, and a different subprocess model all have direct implications for a tool used by developers all day long.
 
 If an interviewer asks "what do you know about Bun?" and you say "not much," that's a missed opportunity. This lesson closes that gap.
 
@@ -12,8 +12,8 @@ If an interviewer asks "what do you know about Bun?" and you say "not much," tha
 
 - Bun is a JavaScript runtime, bundler, package manager, and test runner in a single binary
 - For CLI tools, the three most relevant differences are startup time, TypeScript support, and subprocess behavior
-- Bun's Windows support exists but is less mature than Node's — understanding the gaps is directly relevant to this role
-- Bun and Node are largely API-compatible but not identical — the differences matter in specific situations
+- Bun's Windows support exists but is less mature than Node's -- understanding the gaps is directly relevant to this role
+- Bun and Node are largely API-compatible but not identical -- the differences matter in specific situations
 
 ---
 
@@ -30,7 +30,7 @@ Bun is built on JavaScriptCore (Safari's JS engine) rather than V8 (Chrome/Node'
 | Script runner | `npm run` | `bun run` |
 | TypeScript runner | `ts-node` / `tsx` | `bun` (native) |
 
-The single-binary design matters for CLI distribution — instead of requiring Node + npm + ts-node as prerequisites, a Bun-based CLI can potentially ship as one standalone executable.
+The single-binary design matters for CLI distribution -- instead of requiring Node + npm + ts-node as prerequisites, a Bun-based CLI can potentially ship as one standalone executable.
 
 ---
 
@@ -46,7 +46,7 @@ node dist/index.js      # ~80-120ms cold start
 bun src/index.ts        # ~10-30ms cold start
 ```
 
-For Claude Code specifically, this matters because developers run it in tight loops — asking questions, getting answers, running commands, repeating. Every 100ms of startup latency compounds across a workday.
+For Claude Code specifically, this matters because developers run it in tight loops -- asking questions, getting answers, running commands, repeating. Every 100ms of startup latency compounds across a workday.
 
 **The Windows caveat:** Bun's startup advantage on Windows is smaller than on Linux/macOS because Windows process creation overhead is higher regardless of runtime. The gap narrows but doesn't disappear.
 
@@ -73,9 +73,9 @@ Bun runs TypeScript directly with no extra tooling:
 bun src/index.ts
 ```
 
-For development workflow this is significant — no build step means faster iteration. For production distribution it matters less because you'd typically bundle anyway.
+For development workflow this is significant -- no build step means faster iteration. For production distribution it matters less because you'd typically bundle anyway.
 
-**Important nuance:** Bun does not perform type checking. It strips TypeScript types and runs the JavaScript. You still need `tsc --noEmit` in your CI pipeline to catch type errors — Bun just doesn't surface them at runtime.
+**Important nuance:** Bun does not perform type checking. It strips TypeScript types and runs the JavaScript. You still need `tsc --noEmit` in your CI pipeline to catch type errors -- Bun just doesn't surface them at runtime.
 
 ---
 
@@ -86,7 +86,7 @@ This is the most Windows-relevant difference.
 Node's `child_process` module has been battle-tested on Windows for over a decade. The quirks are well-documented:
 
 ```typescript
-// Node — known Windows behavior
+// Node -- known Windows behavior
 import { spawn } from "child_process";
 
 // On Windows, shell: true uses cmd.exe
@@ -120,7 +120,7 @@ For a tool like Claude Code that spawns many subprocesses (running user commands
 
 ## Package manager differences
 
-`bun install` is dramatically faster than `npm install` — typically 10-20x for large dependency trees. For a CLI tool with many dependencies, this affects contributor experience and CI speed.
+`bun install` is dramatically faster than `npm install` -- typically 10-20x for large dependency trees. For a CLI tool with many dependencies, this affects contributor experience and CI speed.
 
 ```bash
 # Installing Claude Code dependencies
@@ -132,30 +132,30 @@ bun install     # ~4 seconds on a cold cache
 
 ---
 
-## API compatibility — what works, what doesn't
+## API compatibility -- what works, what doesn't
 
 Bun implements most of Node's built-in APIs, but not all. For CLI tools, the relevant gaps:
 
 **Works fine in Bun:**
-- `fs`, `path`, `os` — full compatibility
-- `process.argv`, `process.env`, `process.exit` — full compatibility
-- `readline` — mostly compatible
-- `https`, `http` — mostly compatible
-- `child_process.spawn`, `execSync` — mostly compatible
+- `fs`, `path`, `os` -- full compatibility
+- `process.argv`, `process.env`, `process.exit` -- full compatibility
+- `readline` -- mostly compatible
+- `https`, `http` -- mostly compatible
+- `child_process.spawn`, `execSync` -- mostly compatible
 
 **Watch for differences:**
-- `child_process.fork()` — Bun implements this but behavior differs
-- Native modules (`.node` files) — limited support, improving
-- Some `stream` APIs — minor behavioral differences
-- `worker_threads` — support exists but less mature
+- `child_process.fork()` -- Bun implements this but behavior differs
+- Native modules (`.node` files) -- limited support, improving
+- Some `stream` APIs -- minor behavioral differences
+- `worker_threads` -- support exists but less mature
 
-**The practical implication:** A CLI tool written for Node will likely run on Bun with little or no modification. The issues surface in edge cases — particularly around subprocess management, native modules, and stream handling.
+**The practical implication:** A CLI tool written for Node will likely run on Bun with little or no modification. The issues surface in edge cases -- particularly around subprocess management, native modules, and stream handling.
 
 ---
 
 ## Quick Lab
 
-### Step 1 — Install Bun on Windows
+### Step 1 -- Install Bun on Windows
 
 ```powershell
 # Using PowerShell
@@ -165,7 +165,7 @@ irm bun.sh/install.ps1 | iex
 bun --version
 ```
 
-### Step 2 — Compare startup time
+### Step 2 -- Compare startup time
 
 ```powershell
 # Create a minimal script
@@ -178,7 +178,7 @@ Measure-Command { node test.js }
 Measure-Command { bun test.js }
 ```
 
-### Step 3 — Run TypeScript directly with Bun
+### Step 3 -- Run TypeScript directly with Bun
 
 ```typescript
 // hello.ts
@@ -191,7 +191,7 @@ console.log(greeting);
 bun hello.ts
 ```
 
-### Step 4 — Check what Bun version Claude Code expects
+### Step 4 -- Check what Bun version Claude Code expects
 
 ```powershell
 # In the Claude Code repo
@@ -221,7 +221,7 @@ Be ready to explain:
 
 Strong answer:
 
-*"Bun's main advantages for a CLI tool like Claude Code are startup latency and native TypeScript support. The startup difference is meaningful for a tool developers run constantly — even 80ms adds up. The TypeScript support simplifies the development workflow. The area I'd watch most carefully on Windows is subprocess behavior — Bun's spawn APIs are newer and have more edge cases on Windows than Node's battle-tested child_process module. I'd want comprehensive Windows-specific subprocess tests before relying on Bun for that layer."*
+*"Bun's main advantages for a CLI tool like Claude Code are startup latency and native TypeScript support. The startup difference is meaningful for a tool developers run constantly -- even 80ms adds up. The TypeScript support simplifies the development workflow. The area I'd watch most carefully on Windows is subprocess behavior -- Bun's spawn APIs are newer and have more edge cases on Windows than Node's battle-tested child_process module. I'd want comprehensive Windows-specific subprocess tests before relying on Bun for that layer."*
 
 ---
 
@@ -233,23 +233,23 @@ Strong answer:
       question: "Why does Bun's startup time advantage matter more for CLI tools than for web servers?",
       options: [
         "CLI tools use more memory",
-        "CLI tools are invoked repeatedly throughout the day — startup latency compounds",
+        "CLI tools are invoked repeatedly throughout the day -- startup latency compounds",
         "Web servers don't use JavaScript",
         "Bun only works for CLI tools"
       ],
-      answer: "CLI tools are invoked repeatedly throughout the day — startup latency compounds",
+      answer: "CLI tools are invoked repeatedly throughout the day -- startup latency compounds",
       explanation: "A web server starts once and runs for hours. A CLI tool starts fresh on every invocation. Developers running Claude Code dozens of times per day feel every millisecond of startup overhead."
     },
     {
       question: "Bun runs TypeScript natively. Does this mean you no longer need tsc?",
       options: [
-        "Correct — Bun fully replaces tsc",
-        "No — Bun strips types without checking them, so tsc --noEmit is still needed for type safety",
+        "Correct -- Bun fully replaces tsc",
+        "No -- Bun strips types without checking them, so tsc --noEmit is still needed for type safety",
         "Only for production builds",
         "Yes, but only on Windows"
       ],
-      answer: "No — Bun strips types without checking them, so tsc --noEmit is still needed for type safety",
-      explanation: "Bun transpiles TypeScript by removing type annotations — it does not type-check. Type errors will not surface at runtime. You still need tsc --noEmit in CI to catch type mistakes."
+      answer: "No -- Bun strips types without checking them, so tsc --noEmit is still needed for type safety",
+      explanation: "Bun transpiles TypeScript by removing type annotations -- it does not type-check. Type errors will not surface at runtime. You still need tsc --noEmit in CI to catch type mistakes."
     },
     {
       question: "Which area of Bun has the most Windows-specific edge cases relevant to Claude Code?",

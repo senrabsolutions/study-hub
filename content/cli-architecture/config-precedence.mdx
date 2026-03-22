@@ -47,19 +47,19 @@ Config precedence determines which value wins when multiple configuration source
 
 ## Quick Lab
 
-### Step 1 — Simulate environment variable
+### Step 1 -- Simulate environment variable
 
 ```powershell
 $env:PORT=4000
 ```
 
-### Step 2 — Simulate CLI argument
+### Step 2 -- Simulate CLI argument
 
 ```bash
 node app.js --port=3000
 ```
 
-### Step 3 — Inside your app (conceptually)
+### Step 3 -- Inside your app (conceptually)
 
 ```js
 const port =

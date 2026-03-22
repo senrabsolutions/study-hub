@@ -8,7 +8,7 @@ One of the most confusing real-world issues:
 
 This is often caused by **environment inheritance**.
 
-Every process inherits environment variables from its parent. If that environment is different, behavior changes — even for the same command.
+Every process inherits environment variables from its parent. If that environment is different, behavior changes -- even for the same command.
 
 ---
 
@@ -59,13 +59,13 @@ But running `git --version` directly in your terminal works.
 
 - Your terminal has Git in PATH  
 - The script (or parent process) does not  
-- The subprocess inherits the script’s environment — not your interactive shell’s  
+- The subprocess inherits the script’s environment -- not your interactive shell’s  
 
 ---
 
 ## Quick Lab
 
-### Step 1 — Print environment in Node
+### Step 1 -- Print environment in Node
 
 ```bash
 node -e "console.log(process.env.PATH)"
@@ -73,7 +73,7 @@ node -e "console.log(process.env.PATH)"
 
 ---
 
-### Step 2 — Compare with shell
+### Step 2 -- Compare with shell
 
 #### CMD
 
@@ -89,7 +89,7 @@ $env:PATH
 
 ---
 
-### Step 3 — Spawn a subprocess
+### Step 3 -- Spawn a subprocess
 
 ```bash
 node -e "require('child_process').exec('where git', (e,o)=>console.log(o||e))"

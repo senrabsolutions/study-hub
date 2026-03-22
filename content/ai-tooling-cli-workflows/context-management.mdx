@@ -4,7 +4,7 @@
 
 Context management is one of the hardest unsolved engineering problems in
 agentic AI tools. It is also one of the areas where Windows-specific behavior
-makes things meaningfully harder — verbose Windows error messages, longer path
+makes things meaningfully harder -- verbose Windows error messages, longer path
 strings, and wordier PowerShell output all consume context faster than their
 Unix equivalents.
 
@@ -16,10 +16,10 @@ reliable Windows experience.
 
 ## Key Concepts
 
-- The context window is finite — every token of conversation history, file content, and tool output counts against it
-- Claude Code is responsible for managing what goes into context — the model only sees what Claude Code sends
+- The context window is finite -- every token of conversation history, file content, and tool output counts against it
+- Claude Code is responsible for managing what goes into context -- the model only sees what Claude Code sends
 - Long sessions, large files, and verbose tool output are the three main sources of context pressure
-- When context is exhausted, the session fails — the user experience is a hard stop mid-task
+- When context is exhausted, the session fails -- the user experience is a hard stop mid-task
 - Good context management is invisible to the user; bad context management causes mysterious failures
 
 ---
@@ -32,8 +32,8 @@ In a Claude Code session, the context accumulates from:
 ```
 System prompt              ~2,000 - 10,000 tokens (fixed per session)
 Conversation history       grows with every exchange
-Tool call requests         small — JSON schemas and inputs
-Tool results               CAN BE VERY LARGE — file contents, command output
+Tool call requests         small -- JSON schemas and inputs
+Tool results               CAN BE VERY LARGE -- file contents, command output
 Error messages             Windows errors are often verbose
 ```
 
@@ -145,7 +145,7 @@ For long sessions, Claude Code can compress older exchanges into a summary
 and drop the detailed history:
 
 ```typescript
-// Pseudocode — real implementation uses the API
+// Pseudocode -- real implementation uses the API
 async function summarizeOldContext(
   messages: Message[],
   keepRecent: number = 10
@@ -199,19 +199,19 @@ if (pressure === "critical") {
 
 Context is not the only state Claude Code manages. A session also has:
 
-**Working directory** — where commands run and relative paths resolve from.
+**Working directory** -- where commands run and relative paths resolve from.
 On Windows, this includes the drive letter and must be tracked correctly
 as the user changes directories.
 
-**Environment variables** — captured at session start. Changes made during
+**Environment variables** -- captured at session start. Changes made during
 the session (like PATH updates after installing a tool) are not automatically
 visible unless Claude Code refreshes them.
 
-**Open files / locks** — Windows file locking means a file read by one tool
+**Open files / locks** -- Windows file locking means a file read by one tool
 call may be locked when another tool call tries to write it. Claude Code
 needs to manage this, not leave it to luck.
 
-**Git state** — Claude Code often uses git context (current branch, staged
+**Git state** -- Claude Code often uses git context (current branch, staged
 changes) to inform its behavior. On Windows, git output formatting and path
 handling have quirks that affect how this state is parsed.
 
@@ -219,7 +219,7 @@ handling have quirks that affect how this state is parsed.
 
 ## Quick Lab
 
-### Step 1 — Estimate context usage in a session
+### Step 1 -- Estimate context usage in a session
 
 ```powershell
 # Start a Claude Code session and do several operations
@@ -227,7 +227,7 @@ handling have quirks that affect how this state is parsed.
 claude "how much of your context window have we used so far?"
 ```
 
-### Step 2 — Trigger context pressure intentionally
+### Step 2 -- Trigger context pressure intentionally
 
 ```powershell
 # Ask Claude Code to read several large files at once
@@ -235,7 +235,7 @@ claude "how much of your context window have we used so far?"
 claude "read all the TypeScript files in src/ and summarize what each one does"
 ```
 
-### Step 3 — Observe Windows verbosity
+### Step 3 -- Observe Windows verbosity
 
 ```powershell
 # Run a command that produces verbose Windows output
@@ -251,7 +251,7 @@ Get-ChildItem -Recurse -File | Measure-Object | Select-Object Count
 ## What to Notice
 
 - Context pressure on Windows builds faster than on macOS due to longer paths and more verbose output
-- Tool results — especially file reads and command output — are the main source of context consumption
+- Tool results -- especially file reads and command output -- are the main source of context consumption
 - Truncating and cleaning output before sending it to the model is good engineering, not a shortcut
 - Session state (working directory, environment, file locks) requires explicit management on Windows
 
@@ -269,13 +269,13 @@ Be ready to explain:
 Strong answer:
 
 *"Context management is one of the real engineering challenges in Claude Code.
-Every tool result — file reads, command output, error messages — goes into the
+Every tool result -- file reads, command output, error messages -- goes into the
 context that gets sent with every request. On Windows, context fills up faster
 because paths are longer, error messages are more verbose, and PowerShell output
 has more decoration than Unix equivalents. Good context management means
 truncating large file reads, cleaning command output before it goes into context,
 and warning users before a session hits the limit rather than failing hard.
-That's engineering work in the tool layer — it's not something the model handles
+That's engineering work in the tool layer -- it's not something the model handles
 automatically."*
 
 ---
@@ -293,7 +293,7 @@ automatically."*
         "Windows uses more tokens per character"
       ],
       answer: "Windows path strings are longer, error messages are more verbose, and PowerShell output has more decoration",
-      explanation: "The same task on Windows generates more tokens than on macOS — longer paths, wordier error messages, and formatted PowerShell output all add up. Over a long session, this meaningfully increases context pressure."
+      explanation: "The same task on Windows generates more tokens than on macOS -- longer paths, wordier error messages, and formatted PowerShell output all add up. Over a long session, this meaningfully increases context pressure."
     },
     {
       question: "What is the best approach when a file is too large to fit efficiently in a tool result?",
@@ -310,12 +310,12 @@ automatically."*
       question: "Which of these is a Windows-specific session state concern that doesn't apply on Unix?",
       options: [
         "Tracking the current working directory",
-        "File locking — Windows may prevent a write tool call from accessing a file that a read tool call has open",
+        "File locking -- Windows may prevent a write tool call from accessing a file that a read tool call has open",
         "Environment variable inheritance",
         "Git branch state"
       ],
-      answer: "File locking — Windows may prevent a write tool call from accessing a file that a read tool call has open",
-      explanation: "Windows file locking is stricter than Unix. A file opened by one tool call may be locked when a subsequent tool call tries to write it — a sharing violation that simply doesn't occur on Unix where file locking is advisory rather than mandatory."
+      answer: "File locking -- Windows may prevent a write tool call from accessing a file that a read tool call has open",
+      explanation: "Windows file locking is stricter than Unix. A file opened by one tool call may be locked when a subsequent tool call tries to write it -- a sharing violation that simply doesn't occur on Unix where file locking is advisory rather than mandatory."
     }
   ]}
 />

@@ -2,7 +2,7 @@
 
 ## Why this matters
 
-A huge percentage of CLI tools don’t do everything themselves — they **call other tools**.
+A huge percentage of CLI tools don’t do everything themselves -- they **call other tools**.
 
 Examples:
 - a Node CLI calling `git`
@@ -71,7 +71,7 @@ Result:
 
 ## Quick Lab
 
-### Step 1 — Run a subprocess in Node
+### Step 1 -- Run a subprocess in Node
 
 ```bash
 node -e "require('child_process').exec('echo hello', (e,o)=>console.log(o))"
@@ -79,7 +79,7 @@ node -e "require('child_process').exec('echo hello', (e,o)=>console.log(o))"
 
 ---
 
-### Step 2 — Test PATH-dependent command
+### Step 2 -- Test PATH-dependent command
 
 ```bash
 node -e "require('child_process').exec('git --version', (e,o,err)=>console.log(o||err))"
@@ -87,7 +87,7 @@ node -e "require('child_process').exec('git --version', (e,o,err)=>console.log(o
 
 ---
 
-### Step 3 — Inspect environment
+### Step 3 -- Inspect environment
 
 ```bash
 node -e "console.log(process.env.PATH)"
@@ -137,12 +137,12 @@ Result:
 
 When a subprocess fails:
 
-### Step 1 — Reproduce manually
+### Step 1 -- Reproduce manually
 Run the same command in the terminal
 
 ---
 
-### Step 2 — Check PATH
+### Step 2 -- Check PATH
 
 ```js
 console.log(process.env.PATH)
@@ -150,7 +150,7 @@ console.log(process.env.PATH)
 
 ---
 
-### Step 3 — Capture stderr
+### Step 3 -- Capture stderr
 
 ```js
 exec("git --version", (err, stdout, stderr) => {
@@ -160,7 +160,7 @@ exec("git --version", (err, stdout, stderr) => {
 
 ---
 
-### Step 4 — Check working directory
+### Step 4 -- Check working directory
 
 ```js
 console.log(process.cwd());
@@ -168,7 +168,7 @@ console.log(process.cwd());
 
 ---
 
-### Step 5 — Compare environments
+### Step 5 -- Compare environments
 - terminal vs script  
 - CMD vs PowerShell  
 - IDE vs standalone terminal  
