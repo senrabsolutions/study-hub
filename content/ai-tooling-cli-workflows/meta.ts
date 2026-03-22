@@ -1,7 +1,7 @@
 export const trackMeta = {
   title: "AI Tooling + CLI Workflows",
   description:
-    "How AI-assisted tools integrate into real CLI workflows — including prompt-driven execution, tool invocation patterns, and maintaining safety, control, and developer intent.",
+    "How AI-assisted tools integrate into real CLI workflows -- including prompt-driven execution, tool invocation patterns, and maintaining safety, control, and developer intent.",
 };
 
 export const lessons = [
@@ -19,16 +19,16 @@ export const lessons = [
     title: "How Claude Code Works: The AI Engine Behind the CLI",
     order: 2,
     summary:
-      "The agentic loop, tool use, context windows, and the system prompt — how Claude Code communicates with the model and why Windows engineering lives in the tool layer.",
+      "The agentic loop, tool use, context windows, and the system prompt -- how Claude Code communicates with the model and why Windows engineering lives in the tool layer.",
     duration: "20 min",
     difficulty: "Intermediate",
   },
   {
-    slug: "tool-invocation-patterns",
+    slug: "ai-tool-invocation-patterns",
     title: "Tool Invocation Patterns in Claude Code",
     order: 3,
     summary:
-      "How tools are defined, invoked, and validated — including safety patterns, Windows-specific file and command handling, and parallel tool call concerns.",
+      "How tools are defined, invoked, and validated -- including safety patterns, Windows-specific file and command handling, and parallel tool call concerns.",
     duration: "20 min",
     difficulty: "Intermediate",
   },
