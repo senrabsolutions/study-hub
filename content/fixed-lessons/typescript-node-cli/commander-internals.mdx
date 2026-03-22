@@ -1,0 +1,307 @@
+# Commander Internals: How Argument Parsing Actually Works
+
+## Why this matters
+
+Claude Code is a TypeScript CLI. Whether it uses Commander directly or a similar
+parsing approach, understanding how argument parsing works at the mechanical level
+means you can debug failures that look like Claude Code bugs but are actually
+shell or parsing behavior -- and you can explain that distinction clearly to users
+and teammates.
+
+When a Windows user reports "Claude Code ignores my flag" or "my argument with
+spaces breaks the command," the answer almost always lives here.
+
+---
+
+## Key Concepts
+
+- Argument parsing is a transformation of a flat string array into a structured object
+- The shell performs its own transformations before Node ever sees the input
+- Commander's parsing pipeline has distinct phases -- each can fail independently
+- Understanding the pipeline tells you exactly where to look when something breaks
+
+---
+
+## The parsing pipeline
+
+Every argument a user types travels through three distinct stages before your
+handler sees it:
+
+```
+User types:   claude run "my file.ts" --verbose --timeout 3000
+      ↓
+Shell stage:  tokenizes, expands globs, handles quoting
+      ↓
+process.argv: ['node', '/path/to/claude', 'run', 'my file.ts', '--verbose', '--timeout', '3000']
+      ↓
+Commander:    matches subcommand, parses flags, validates types
+      ↓
+Your handler: (file = 'my file.ts', options = { verbose: true, timeout: 3000 })
+```
+
+Each stage has different rules on Windows vs Unix.
+
+---
+
+## Stage 1: The shell (before Node sees anything)
+
+This is where most Windows-specific argument bugs originate.
+
+**PowerShell quoting:**
+```powershell
+# Double quotes -- preserved as single argument
+claude run "my file.ts"       # argv: ['my file.ts']
+
+# Single quotes -- literal in PowerShell (unlike bash)
+claude run 'my file.ts'       # argv: ['my file.ts']
+
+# No quotes -- spaces split into separate arguments
+claude run my file.ts         # argv: ['my', 'file.ts']  ← WRONG
+```
+
+**CMD quoting:**
+```batch
+:: Double quotes work
+claude run "my file.ts"       :: argv: ['my file.ts']
+
+:: Single quotes are LITERAL in CMD -- not string delimiters
+claude run 'my file.ts'       :: argv: ["'my", "file.ts'"]  ← WRONG
+```
+
+**The debugging move when arguments seem wrong:**
+```typescript
+// Add this temporarily anywhere in your entry point
+console.log("Raw argv:", process.argv.slice(2));
+process.exit(0);
+```
+
+This tells you exactly what the shell passed to Node -- before Commander touches it.
+
+---
+
+## Stage 2: Commander's tokenizer
+
+Commander receives `process.argv.slice(2)` -- the raw array after stripping
+`node` and the script path.
+
+It then walks the array left to right, classifying each token:
+
+```
+Token classification rules (simplified):
+  starts with '--'  →  long option name
+  starts with '-'   →  short option (may be combined: -abc = -a -b -c)
+  follows an option that takes a value  →  that option's value
+  otherwise  →  positional argument or subcommand name
+```
+
+**Combined short flags -- a common confusion:**
+```
+-abc  →  Commander splits into -a -b -c
+-v3   →  Commander reads as -v with value '3' (if -v takes a value)
+         OR as -v and positional '3' (if -v is boolean)
+```
+
+This means the definition of a flag changes how subsequent tokens are parsed.
+Changing a boolean flag to one that takes a value is a breaking change.
+
+---
+
+## Stage 3: Option definition and type coercion
+
+Commander uses your `.option()` calls to understand what to expect:
+
+```typescript
+program
+  .option('-v, --verbose',          'boolean flag -- no value expected')
+  .option('-t, --timeout <ms>',     'required value -- next token consumed')
+  .option('-o, --output [file]',    'optional value -- next token consumed if not a flag')
+  .option('-n, --count <n>',        'number', parseInt)  // with coercion function
+  .option('--tag <t>',              'repeatable', collect, [])  // custom collector
+```
+
+**The `<required>` vs `[optional]` distinction matters for Windows users:**
+
+```powershell
+# If --output takes an optional value [file]:
+claude --output report.txt    # output = 'report.txt'
+claude --output --verbose     # output = true (--verbose is a flag, not a value)
+claude --output               # output = true (nothing follows)
+
+# If --output takes a required value <file>:
+claude --output --verbose     # ERROR: missing required argument for --output
+```
+
+Optional value options are more forgiving but harder to reason about.
+
+---
+
+## Stage 4: Subcommand routing
+
+When Commander sees a token that matches a registered subcommand name, it
+hands off the remaining `argv` to that subcommand's parser:
+
+```typescript
+program
+  .command('run <file>')
+  .option('--verbose')
+  .action((file, options) => { ... });
+
+program
+  .command('init [directory]')
+  .option('--template <name>')
+  .action((directory, options) => { ... });
+```
+
+**Important:** options defined on the parent program are NOT automatically
+available in subcommands unless you use `.passThroughOptions()` or
+`.allowUnknownOption()`. This is a common source of "option not recognized"
+errors when users expect parent-level flags to work everywhere.
+
+---
+
+## Where Commander fails on Windows -- the real cases
+
+### Case 1: Glob expansion
+
+```powershell
+# PowerShell does NOT expand globs automatically (unlike bash)
+claude run *.ts     # argv: ['*.ts'] -- literal string, not expanded
+
+# Bash DOES expand globs
+claude run *.ts     # argv: ['file1.ts', 'file2.ts', 'file3.ts']
+```
+
+If your tool expects Commander to receive multiple files from a glob, it will
+work on Linux/macOS and silently do the wrong thing on Windows PowerShell.
+Solution: handle glob expansion explicitly in your tool.
+
+### Case 2: Equals sign in option values
+
+```powershell
+claude --filter=*.ts    # Some parsers handle this, some split on =
+claude --filter *.ts    # More portable
+```
+
+Commander handles both, but if you're doing your own pre-processing before
+Commander sees `argv`, watch for this.
+
+### Case 3: Numeric arguments parsed as numbers by the shell
+
+This is rare but happens in some shell configurations where bare numbers get
+type-coerced before Node sees them. Always use `parseInt` or `parseFloat`
+coercion in your Commander option definition rather than assuming the value
+arrives as the right type.
+
+---
+
+## Quick Lab
+
+### Step 1 -- See Commander's token classification
+
+```javascript
+// commander-debug.js
+const { Command } = require('commander');
+const program = new Command();
+
+program
+  .command('run <file>')
+  .option('-v, --verbose')
+  .option('-t, --timeout <ms>', 'timeout', parseInt)
+  .action((file, options) => {
+    console.log('file:', file);
+    console.log('options:', options);
+    console.log('raw argv:', process.argv.slice(2));
+  });
+
+program.parse(process.argv);
+```
+
+```powershell
+node commander-debug.js run myfile.ts -v -t 3000
+node commander-debug.js run "my file.ts" --timeout=5000
+node commander-debug.js run myfile.ts -vt 3000   # combined short flags
+```
+
+### Step 2 -- Trigger an optional vs required value difference
+
+```javascript
+program.option('--output [file]', 'optional output');
+program.option('--name <value>',  'required name');
+```
+
+```powershell
+node commander-debug.js run file.ts --output
+node commander-debug.js run file.ts --name      # should error
+```
+
+---
+
+## What to Notice
+
+- The shell transforms input before Commander sees it -- most Windows argument
+  bugs happen here, not in Commander itself
+- `process.argv` logging is the fastest diagnostic tool you have
+- Boolean flags vs value-taking flags change how subsequent tokens are classified
+- Subcommand options are isolated -- parent options don't bleed through by default
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- The three-stage pipeline from user input to handler
+- Why the same command behaves differently in PowerShell vs CMD vs bash
+- How to diagnose an argument parsing bug on Windows
+- The difference between required `<value>` and optional `[value]` options
+
+Strong answer:
+
+*"When an argument seems to be ignored or misinterpreted on Windows, the first
+thing I check is what process.argv actually contains -- before Commander touches
+it. Most Windows argument bugs happen at the shell stage, not in the parser.
+PowerShell and CMD handle quoting differently, and neither expands globs the
+way bash does. Once I can see the raw argv, I can tell immediately whether
+the problem is the shell, Commander's tokenizer, or the option definition."*
+
+---
+
+<QuizSet
+  title="Commander Internals Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Where do most Windows-specific argument parsing bugs originate?",
+      options: [
+        "Inside Commander's tokenizer",
+        "In the shell, before Node receives process.argv",
+        "In Node's argument handling",
+        "In the action handler callback"
+      ],
+      answer: "In the shell, before Node receives process.argv",
+      explanation: "PowerShell and CMD handle quoting, escaping, and glob expansion differently than bash. These transformations happen before Node sees the arguments, so Commander receives already-transformed input."
+    },
+    {
+      question: "What is the fastest way to diagnose an argument parsing bug on Windows?",
+      options: [
+        "Read the Commander source code",
+        "Log process.argv.slice(2) before Commander parses it",
+        "Reinstall the CLI tool",
+        "Check the Windows registry"
+      ],
+      answer: "Log process.argv.slice(2) before Commander parses it",
+      explanation: "Logging the raw argv array shows you exactly what the shell passed to Node -- before any framework processing. This immediately tells you whether the bug is in the shell stage or the parsing stage."
+    },
+    {
+      question: "Why is changing a boolean flag to a value-taking flag a breaking change?",
+      options: [
+        "It requires a new version of Commander",
+        "It changes how Commander classifies the token that follows the flag",
+        "Boolean flags cannot be removed",
+        "It affects the subcommand routing logic"
+      ],
+      answer: "It changes how Commander classifies the token that follows the flag",
+      explanation: "If --output was boolean and you change it to take a value, the token after --output is now consumed as its value instead of being parsed as the next independent argument. This silently breaks any script that used --output as a boolean."
+    }
+  ]}
+/>

@@ -1,0 +1,230 @@
+# Building a CLI with TypeScript and Node.js
+
+## Why this matters
+
+Claude Code is a TypeScript CLI tool built on Node.js. When you work on it, you are working directly in this stack. Understanding how Node CLI tools are structured -- how they read arguments, handle stdin/stdout, manage exit codes, and get packaged -- is foundational to this role.
+
+This is not abstract. Every bug you fix, every feature you ship, every Windows compatibility issue you diagnose will happen inside a codebase that works exactly like what this lesson covers.
+
+---
+
+## Key Concepts
+
+- A CLI is a Node.js program that reads from `process.argv` and writes to `process.stdout` / `process.stderr`
+- Entry points are defined in `package.json` under `bin`
+- Exit codes communicate success or failure to the calling process
+- stdin/stdout/stderr are streams -- understanding them matters for piping and automation
+
+---
+
+## Anatomy of a Node CLI
+
+### The entry point
+
+```typescript
+#!/usr/bin/env node
+
+// process.argv looks like:
+// ['node', '/path/to/cli.js', 'arg1', '--flag', 'value']
+// Your arguments start at index 2
+const args = process.argv.slice(2);
+console.log("Arguments:", args);
+```
+
+The `#!/usr/bin/env node` shebang tells Unix-like systems to run this with Node.
+On Windows, this line is ignored -- Node is invoked via the `.cmd` wrapper that npm creates.
+
+---
+
+### Registering as a CLI tool
+
+In `package.json`:
+
+```json
+{
+  "name": "my-tool",
+  "version": "1.0.0",
+  "bin": {
+    "my-tool": "./dist/index.js"
+  }
+}
+```
+
+When installed globally (`npm install -g`) or locally and run via `npx`, npm creates a wrapper script that puts `my-tool` on PATH.
+
+On Windows specifically, npm creates **three files**:
+- `my-tool` -- shell script for Git Bash / WSL
+- `my-tool.cmd` -- batch file for CMD
+- `my-tool.ps1` -- PowerShell script
+
+This is why Windows PATH and shell compatibility issues are so common with CLI tools.
+
+---
+
+### Exit codes
+
+Exit codes are how your CLI communicates success or failure to scripts, CI systems, and other tools.
+
+```typescript
+// Success
+process.exit(0);
+
+// Failure
+process.exit(1);
+
+// If you don't call process.exit(), Node exits with 0 by default
+// unless an unhandled error occurred
+```
+
+**This matters for Windows users** because PowerShell and CMD both check `$LASTEXITCODE` / `%ERRORLEVEL%`. A tool that exits with 0 after failing silently breaks automation workflows.
+
+```powershell
+my-tool do-something
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Tool failed"
+}
+```
+
+---
+
+### stdout vs stderr
+
+```typescript
+// stdout -- for output the user or calling process actually needs
+process.stdout.write("result data\n");
+console.log("result data"); // same thing
+
+// stderr -- for errors, warnings, diagnostic messages
+process.stderr.write("Error: something failed\n");
+console.error("Error: something failed"); // same thing
+```
+
+Why it matters: when a user pipes your tool's output (`my-tool | other-tool`), only stdout is piped. stderr goes straight to the terminal. Mixing them breaks pipelines.
+
+---
+
+## TypeScript setup
+
+A minimal TypeScript CLI project:
+
+```
+my-tool/
+  src/
+    index.ts
+  dist/           ← compiled output
+  package.json
+  tsconfig.json
+```
+
+`tsconfig.json`:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true
+  }
+}
+```
+
+`package.json` scripts:
+```json
+{
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js"
+  }
+}
+```
+
+---
+
+## Quick Lab
+
+### Step 1 -- Check how Node sees arguments
+
+```powershell
+node -e "console.log(process.argv)"
+```
+
+### Step 2 -- Check exit code behavior in PowerShell
+
+```powershell
+node -e "process.exit(1)"
+echo $LASTEXITCODE   # should print 1
+
+node -e "process.exit(0)"
+echo $LASTEXITCODE   # should print 0
+```
+
+### Step 3 -- See npm bin wrappers on Windows
+
+```powershell
+# After installing a global package:
+Get-ChildItem "$env:APPDATA\npm" | Where-Object { $_.Name -like "npx*" }
+# You'll see .cmd and .ps1 variants
+```
+
+---
+
+## What to Notice
+
+- On Windows, npm creates `.cmd` wrappers -- the shebang line in your script is irrelevant to CMD/PowerShell
+- Exit codes matter for automation -- tools that always exit 0 break CI pipelines
+- stdout is for data, stderr is for everything else
+- TypeScript needs a build step -- your `bin` should point to `dist/`, not `src/`
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- How a TypeScript CLI gets from source to executable on Windows
+- Why npm creates `.cmd` and `.ps1` wrappers and what problem they solve
+- The difference between stdout and stderr and why it matters for piping
+- How exit codes integrate with PowerShell automation
+
+Strong answer:
+
+*"A Node CLI is just a script with a bin entry in package.json. On Windows, npm generates .cmd and .ps1 wrappers so the tool works in both CMD and PowerShell without the user thinking about shebangs. Exit codes and stdout/stderr separation matter a lot for Windows users who want to use the tool in scripts or pipelines."*
+
+---
+
+<QuizSet
+  title="Building a CLI Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why does npm create .cmd and .ps1 wrapper files on Windows?",
+      options: [
+        "To make the tool slower",
+        "Because Windows shells cannot execute the shebang line directly",
+        "To add extra security checks",
+        "Because Node.js requires it on all platforms"
+      ],
+      answer: "Because Windows shells cannot execute the shebang line directly",
+      explanation: "CMD and PowerShell don't understand Unix shebangs. npm generates wrappers so the tool works natively in Windows shells."
+    },
+    {
+      question: "What exit code should a CLI return on success?",
+      options: ["1", "-1", "0", "Any non-zero value"],
+      answer: "0",
+      explanation: "Exit code 0 signals success. Non-zero values signal failure. This is how shells and CI systems determine whether a command succeeded."
+    },
+    {
+      question: "Why should error messages go to stderr instead of stdout?",
+      options: [
+        "stderr is faster",
+        "So that piping stdout to another tool only receives actual output data",
+        "Because Windows requires it",
+        "stdout doesn't support error formatting"
+      ],
+      answer: "So that piping stdout to another tool only receives actual output data",
+      explanation: "When you pipe output between tools, only stdout is passed. Errors on stderr go directly to the terminal without polluting the pipeline."
+    }
+  ]}
+/>

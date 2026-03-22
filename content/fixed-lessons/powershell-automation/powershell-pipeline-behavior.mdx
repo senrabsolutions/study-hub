@@ -1,0 +1,192 @@
+# PowerShell Pipeline Behavior
+
+## Why this matters
+
+PowerShell’s pipeline is fundamentally different from traditional shells.
+
+- bash pipes **text**
+- PowerShell pipes **objects**
+
+This difference is powerful -- but also causes confusion when working with native CLI tools.
+
+If you don’t understand this, you’ll run into:
+
+- pipelines behaving unexpectedly
+- commands breaking when chained
+- incompatibility with traditional CLI tools
+
+---
+
+## Key Concepts
+
+### Object Pipeline
+
+PowerShell passes structured objects between commands:
+
+```powershell
+Get-Process | Select-Object -First 1
+```
+
+- `Get-Process` outputs objects
+- `Select-Object` receives and processes those objects
+
+---
+
+### Text Pipeline (Traditional CLI)
+
+In bash or CMD:
+
+```bash
+ps | grep node
+```
+
+- everything is plain text
+- tools parse strings
+
+---
+
+### Mixing the Two
+
+When you use native tools in PowerShell:
+
+```powershell
+git status | Select-Object -First 1
+```
+
+This works differently than expected because:
+- `git` outputs text
+- PowerShell expects objects
+
+---
+
+## Quick Summary
+
+PowerShell pipelines pass objects, not text. Native tools output text, which can break or behave unexpectedly in pipelines.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Object pipeline
+
+```powershell
+Get-Service | Select-Object -First 3
+```
+
+### Step 2 -- Native tool pipeline
+
+```powershell
+git status | Select-Object -First 1
+```
+
+### Step 3 -- Convert to string explicitly
+
+```powershell
+git status | Out-String
+```
+
+---
+
+## What to Notice
+
+- Cmdlets pass structured data
+- Native tools pass plain text
+- PowerShell does not automatically convert text into rich objects
+- Mixing the two requires awareness
+
+---
+
+## Real-World Example
+
+You try to filter output from a CLI tool:
+
+```powershell
+mytool list | Where-Object { $_.Name -eq "test" }
+```
+
+Fails.
+
+Why?
+
+Because `mytool` outputs text, not objects with properties.
+
+---
+
+## Debugging Strategy
+
+When pipelines behave incorrectly:
+
+1. Check whether the command outputs:
+   - objects (cmdlet)
+   - text (native tool)
+
+2. Inspect output type:
+
+```powershell
+Get-Process | Get-Member
+```
+
+3. Convert output if needed:
+
+```powershell
+command | Out-String
+```
+
+4. Avoid mixing pipelines when possible
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- PowerShell pipelines pass objects, not text
+- Native tools output text, which may not behave as expected
+- Mixing cmdlets and native tools can cause issues
+- Proper handling requires understanding output types
+
+Strong answer example:
+
+“PowerShell pipelines pass structured objects, unlike traditional shells that pass text. When using native CLI tools, their text output doesn’t integrate cleanly with object-based pipelines, which can cause unexpected behavior.”
+
+---
+
+<QuizSet
+  title="PowerShell Pipeline Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What does PowerShell pass through pipelines?",
+      options: [
+        "Only text",
+        "Structured objects",
+        "Registry values",
+        "Files only"
+      ],
+      answer: "Structured objects",
+      explanation: "PowerShell pipelines pass objects between cmdlets."
+    },
+    {
+      question: "Why do native CLI tools behave differently in PowerShell pipelines?",
+      options: [
+        "Because PowerShell blocks them",
+        "Because they output text instead of objects",
+        "Because Windows disables pipelines",
+        "Because PATH is missing"
+      ],
+      answer: "Because they output text instead of objects",
+      explanation: "Native tools output text, which does not integrate with object pipelines."
+    },
+    {
+      question: "What can help when mixing native tools with PowerShell pipelines?",
+      options: [
+        "Ignoring errors",
+        "Converting output using Out-String",
+        "Disabling PowerShell",
+        "Restarting the OS"
+      ],
+      answer: "Converting output using Out-String",
+      explanation: "Out-String can help adapt text output for pipeline use."
+    }
+  ]}
+/>

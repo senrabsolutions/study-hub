@@ -1,0 +1,232 @@
+# The Anthropic Interview Process
+
+## Why this matters
+
+Anthropic's interview process is deliberately designed to be different from
+standard tech interviews. Knowing what to expect -- the stages, the types of
+questions, the evaluation criteria -- lets you prepare the right things instead
+of the wrong things.
+
+---
+
+## Key Concepts
+
+- Every candidate goes through a culture interview regardless of role
+- Technical interviews have an "Anthropic flavor" -- Windows-specific for your role
+- Interviewers are trained and selective -- not everyone at Anthropic is allowed to interview
+- The process rewards intellectual honesty and genuine thinking over polished answers
+- Credentials matter less than demonstrated ability
+
+---
+
+## The interview stages
+
+### Stage 1: Recruiter screen
+
+The first checkpoint is mission alignment and basic qualifications. The recruiter
+is specifically trained to assess whether you're here for the right reasons --
+not just whether your resume matches the job description.
+
+**What they're looking for:**
+- A genuine, specific answer to "why Anthropic?"
+- Awareness of what the role actually involves
+- Basic evidence that you have the relevant experience
+
+**How to prepare:**
+- Have your "why Anthropic" answer ready -- specific, honest, connected to your background
+- Know the job description well enough to speak to each requirement
+- Be ready to give a brief overview of your most relevant experience
+
+---
+
+### Stage 2: Technical interviews
+
+For the Windows platform engineering role, expect multiple technical rounds.
+These will include:
+
+**Windows platform depth** -- Real Windows internals questions, not trivia. Be
+ready to walk through debugging scenarios, explain why something behaves
+differently on Windows, discuss PATH resolution, process model, file locking,
+shell compatibility. This is your strongest area -- lean into it.
+
+**Systems design** -- How would you design the path normalization layer for
+Claude Code? How would you architect the tool execution layer to be
+Windows-reliable? These are open-ended, and the interviewer is evaluating
+your reasoning process as much as your answer.
+
+**Coding** -- Live coding, likely in TypeScript or JavaScript given the codebase.
+You can look things up. The bar is not "memorized syntax" -- it is "can you
+think through a problem and write something that works." Expect problems
+that have a Windows flavor -- handling paths, spawning subprocesses, parsing
+command output.
+
+**Cross-functional thinking** -- How would you communicate a Windows-specific
+bug to a team that primarily works on macOS? How would you prioritize
+a backlog of Windows issues? These test whether you can operate effectively
+in a collaborative, cross-platform team.
+
+---
+
+### Stage 3: Culture interview
+
+Universal for every candidate. Conducted by a trained interviewer -- not just
+whoever is available. Anthropic requires interviewers to have at least 30 days
+of tenure and complete rigorous multi-stage training before they can interview
+candidates.
+
+**What it tests:**
+- Genuine mission alignment -- can you articulate why this matters to you?
+- Ownership and self-direction -- do you wait to be told what to do, or drive?
+- Handling ambiguity -- how do you operate when requirements aren't clear?
+- Direct communication -- do you say what you actually think?
+- Intellectual humility -- can you engage honestly with things you don't know?
+
+**Common question themes:**
+- "Tell me about a time you identified a problem no one asked you to solve."
+- "Tell me about a time you disagreed with a decision. What did you do?"
+- "Why Anthropic specifically -- not just AI in general?"
+- "What do you think is genuinely uncertain or hard about AI safety?"
+- "How do you handle a situation where you don't have enough information to be confident?"
+
+---
+
+### What Anthropic weighs heavily
+
+Anthropic explicitly deprioritizes conventional credentials. They seek direct
+evidence of ability -- personal accomplishments like independent research,
+open-source contributions, or projects that demonstrate relevant thinking.
+
+Your Study Hub is directly relevant here. It is:
+- Independent work you drove yourself
+- Directly connected to the role you're applying for
+- Evidence of how you think about problems, not just what you've been paid to do
+- Something you can speak to in detail because you built it
+
+When the interviewer asks about your background, lead with what you've built
+and how you think -- not your job titles.
+
+---
+
+## The questions you should ask them
+
+The questions you ask signal as much as the answers you give. Good questions
+show genuine curiosity about the work, not just about the job.
+
+**Questions that work well:**
+- "What does the Windows experience look like for Claude Code users today -- and where are the biggest pain points you haven't been able to address yet?"
+- "How does the Claude Code team collaborate with the research teams at Anthropic?"
+- "What does ownership look like for this role -- is there an existing roadmap, or would I be defining what Windows work gets prioritized?"
+- "How does the team handle disagreements about technical direction?"
+- "What has surprised you most about working at Anthropic compared to what you expected?"
+
+**Questions that don't work well:**
+- "What is the salary range?" -- save for the recruiter, not the technical interview
+- "What does Anthropic do?" -- you should know this deeply before interviewing
+- "Is there room for growth?" -- vague and signals you're thinking about the ladder, not the work
+
+---
+
+## How to talk about your background
+
+Your background is genuinely unusual for this role -- most candidates will
+be software engineers with less Windows depth and less security/compliance
+experience. Frame it honestly:
+
+**Lead with the Windows depth.** Ten years of real Windows platform engineering
+in defense environments is rare. The classified environments, the compliance
+requirements, the scale -- these are signals of operating in high-stakes
+systems where correctness matters. That's what Claude Code needs.
+
+**Own the TypeScript gap honestly.** You are newer to TypeScript than to
+Windows. You've been building toward it -- the Study Hub is TypeScript --
+but you don't have production TypeScript CLI shipping experience yet. Say that
+directly rather than overselling. Then immediately follow with why you're
+confident you can ramp quickly and what you've already done to start.
+
+**Connect everything to the mission.** Every answer is an opportunity to show
+that you understand how this specific work connects to why Anthropic exists.
+Not in a forced way -- genuinely. The Windows experience is the mission made
+concrete.
+
+---
+
+## Quick Lab
+
+Practice these out loud -- not just in your head:
+
+1. Give your full "why Anthropic" answer in under 90 seconds. Time yourself.
+
+2. Walk through the `//C:/` path startup bug -- the problem, the secondary effects,
+   the implementation approach, the migration strategy. Do it out loud as if
+   explaining to an engineer who doesn't know the bug exists.
+
+3. Answer: "Tell me about a time you built something no one asked you to build."
+   The answer is Study Hub -- practice telling that story naturally.
+
+4. Answer: "What do you find genuinely uncertain or hard about AI safety?"
+   This is not a trick question. They want to hear you engage honestly with
+   a hard question, not give the "correct" answer.
+
+5. Answer: "You don't have production TypeScript experience. Why should we
+   hire you over someone who does?" Practice this one until it feels confident
+   rather than defensive.
+
+---
+
+## Interview Angle
+
+The meta-point for every stage of the interview:
+
+Anthropic is not looking for someone who performed the role of "great candidate."
+They are looking for someone who is genuinely the person they need. That means:
+
+- Say what you actually think, not what you think they want to hear
+- Engage with hard questions honestly rather than deflecting
+- Show your reasoning process, not just your conclusions
+- Be specific -- vague answers signal either that you haven't thought deeply or that you're hiding something
+
+The Study Hub, the bug analysis, the migration scripts, the lessons you've been
+writing -- all of this is evidence of how you actually think. Bring it to the
+interview. Let it speak.
+
+---
+
+<QuizSet
+  title="Interview Process Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What does Anthropic&apos;s universal culture interview primarily evaluate?",
+      options: [
+        "Technical skills specific to the role",
+        "Whether you can pass a background check",
+        "Genuine mission alignment, ownership, and whether you&apos;ll thrive in their specific working environment",
+        "Your familiarity with Claude&apos;s product features"
+      ],
+      answer: "Genuine mission alignment, ownership, and whether you&apos;ll thrive in their specific working environment",
+      explanation: "The culture interview is conducted by trained interviewers and evaluates traits like genuine mission alignment, how you operate with ambiguity, how you handle disagreement, and whether your working style fits a high-autonomy, mission-first environment. It applies to every candidate regardless of role."
+    },
+    {
+      question: "How should you handle the TypeScript experience gap honestly in an interview?",
+      options: [
+        "Avoid mentioning it and hope they don&apos;t ask",
+        "Claim more TypeScript experience than you have",
+        "Acknowledge it directly, explain what you&apos;ve done to build toward it, and articulate why your Windows depth compensates",
+        "Say TypeScript doesn&apos;t really matter for the role"
+      ],
+      answer: "Acknowledge it directly, explain what you&apos;ve done to build toward it, and articulate why your Windows depth compensates",
+      explanation: "Anthropic values intellectual honesty and directness. Trying to hide a gap signals the opposite of their culture. Acknowledging it directly while showing genuine effort to address it -- the Study Hub, the lessons you&apos;ve built -- is the honest and effective approach."
+    },
+    {
+      question: "What makes Study Hub particularly strong as evidence in an Anthropic interview?",
+      options: [
+        "It uses the same tech stack as Claude Code",
+        "It was built independently, is directly connected to the role, and demonstrates how you think -- not just what you&apos;ve been paid to do",
+        "It has many GitHub stars",
+        "It was mentioned in your cover letter"
+      ],
+      answer: "It was built independently, is directly connected to the role, and demonstrates how you think -- not just what you&apos;ve been paid to do",
+      explanation: "Anthropic explicitly deprioritizes conventional credentials and seeks direct evidence of ability. Study Hub is independent work you drove yourself that directly demonstrates how you approach the exact problem domain of the role. That is precisely the kind of signal they weight heavily."
+    }
+  ]}
+/>

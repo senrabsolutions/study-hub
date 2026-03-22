@@ -1,0 +1,179 @@
+# CLI Argument Parsing
+
+## Why this matters
+
+Every CLI tool starts with one thing:
+
+👉 parsing user input
+
+If argument parsing is unclear or inconsistent, the tool becomes:
+
+- hard to use
+- hard to debug
+- easy to misuse
+
+Understanding argument parsing helps you:
+
+- design clean, predictable CLI interfaces
+- debug why commands behave unexpectedly
+- explain how real tools (npm, git, etc.) interpret input
+
+---
+
+## Key Concepts
+
+- CLI input is just a list of strings passed to the program
+- Arguments are typically structured as:
+  - commands (`git commit`)
+  - flags (`--verbose`)
+  - options (`--port=3000`)
+- In Node.js:
+
+```js
+process.argv
+```
+
+contains the raw input
+
+Example:
+
+```bash
+node app.js --port=3000
+```
+
+Becomes:
+
+```js
+[
+  "node",
+  "app.js",
+  "--port=3000"
+]
+```
+
+- Parsing transforms raw strings into structured data
+
+---
+
+## Quick Summary
+
+Argument parsing converts raw command-line input into structured values that your program can use.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Create a simple script
+
+```js
+console.log(process.argv);
+```
+
+### Step 2 -- Run it
+
+```bash
+node app.js hello --port=3000 --debug
+```
+
+### Step 3 -- Observe output
+
+You’ll see all arguments as strings.
+
+---
+
+## What to Notice
+
+- Everything starts as raw strings
+- Flags and values are not automatically parsed
+- Your program (or a library) must interpret them
+- Order and format matter
+
+---
+
+## Real-World Example
+
+A CLI tool supports:
+
+```bash
+mytool deploy --env=prod --verbose
+```
+
+Internally, it parses:
+
+```js
+{
+  command: "deploy",
+  env: "prod",
+  verbose: true
+}
+```
+
+---
+
+## Debugging Strategy
+
+When CLI behavior is wrong:
+
+1. Inspect raw input (`process.argv`)
+2. Confirm flags are formatted correctly
+3. Check for:
+   - missing `=` vs space-separated values
+   - incorrect flag names
+   - ordering issues
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- CLI input is passed as raw strings
+- Tools must parse and interpret arguments
+- Structured parsing enables predictable behavior
+- Libraries are often used to simplify parsing
+
+Strong answer example:
+
+“CLI input comes in as raw strings via process.argv. A tool needs to parse those into structured values like flags and options. Using a consistent parsing strategy ensures predictable and user-friendly behavior.”
+
+---
+
+<QuizSet
+  title="CLI Argument Parsing Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "How are CLI arguments received in Node.js?",
+      options: [
+        "Through the registry",
+        "Through process.argv as an array of strings",
+        "Through environment variables only",
+        "Through config files"
+      ],
+      answer: "Through process.argv as an array of strings",
+      explanation: "Node provides CLI input via process.argv."
+    },
+    {
+      question: "Why is argument parsing necessary?",
+      options: [
+        "To convert raw strings into structured values",
+        "To improve network speed",
+        "To access the filesystem",
+        "To modify registry keys"
+      ],
+      answer: "To convert raw strings into structured values",
+      explanation: "Parsing turns raw input into usable program data."
+    },
+    {
+      question: "What problem occurs without proper parsing?",
+      options: [
+        "The OS crashes",
+        "Input becomes unpredictable and hard to use",
+        "Environment variables stop working",
+        "Permissions are ignored"
+      ],
+      answer: "Input becomes unpredictable and hard to use",
+      explanation: "Without parsing, tools cannot reliably interpret user input."
+    }
+  ]}
+/>

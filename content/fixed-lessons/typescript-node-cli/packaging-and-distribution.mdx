@@ -1,0 +1,270 @@
+# Packaging and Distributing a CLI on Windows
+
+## Why this matters
+
+A CLI that works on your machine but fails to install cleanly on someone else's Windows box is a broken CLI. Distribution is where most Windows-specific problems surface -- PATH conflicts, missing wrappers, permission errors, antivirus interference, and package manager quirks.
+
+This is one of the core responsibilities of the Claude Code Windows role: ensuring installation is smooth and reliable across different Windows environments.
+
+---
+
+## Key Concepts
+
+- npm `bin` entries create shell wrappers on Windows automatically
+- Windows has multiple package managers (winget, Chocolatey, Scoop) with different installation behaviors
+- Global vs local installs behave differently on PATH
+- Signing matters on Windows for enterprise environments
+
+---
+
+## npm bin and how Windows wrappers work
+
+When you publish an npm package with a `bin` entry and a user installs it globally:
+
+```json
+{
+  "name": "my-tool",
+  "bin": {
+    "my-tool": "./dist/index.js"
+  }
+}
+```
+
+npm creates wrappers in the global npm bin directory:
+
+```
+C:\Users\<user>\AppData\Roaming\npm\
+  my-tool          ← sh/bash wrapper (for Git Bash, WSL)
+  my-tool.cmd      ← batch wrapper (for CMD)
+  my-tool.ps1      ← PowerShell wrapper
+```
+
+The `.cmd` wrapper looks like this:
+
+```batch
+@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+
+IF EXIST "%dp0%\node.exe" (
+  SET "_prog=%dp0%\node.exe"
+) ELSE (
+  SET "_prog=node"
+  SET PATHEXT=%PATHEXT:;.JS;=;%
+)
+
+"%_prog%"  "%dp0%\node_modules\my-tool\dist\index.js" %*
+```
+
+The `.ps1` wrapper looks like this:
+
+```powershell
+#!/usr/bin/env pwsh
+$basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent
+$ret=0
+& "node" "$basedir/node_modules/my-tool/dist/index.js" $args
+$ret=$LASTEXITCODE
+exit $ret
+```
+
+**This is why PowerShell execution policy matters for CLI tools.** The `.ps1` wrapper won't run if `Get-ExecutionPolicy` is `Restricted`. Users will see the tool fail in PowerShell even though it works in CMD.
+
+---
+
+## Common Windows installation problems
+
+### Problem 1: Tool works in CMD but not PowerShell
+
+**Cause:** PowerShell execution policy is blocking the `.ps1` wrapper.
+
+**Debug:**
+```powershell
+Get-ExecutionPolicy  # If Restricted, .ps1 won't run
+```
+
+**Fix:**
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+---
+
+### Problem 2: Tool not found after global install
+
+**Cause:** npm global bin directory is not on PATH.
+
+**Debug:**
+```powershell
+npm config get prefix           # Find npm global dir
+$env:PATH                       # Check if it's in PATH
+```
+
+**Fix:**
+Add the npm prefix to PATH manually, or reinstall Node.js using the official installer which handles this.
+
+---
+
+### Problem 3: Old version runs after update
+
+**Cause:** Multiple versions exist on PATH and an older one takes precedence.
+
+**Debug:**
+```powershell
+Get-Command my-tool | Select-Object -ExpandProperty Source
+where.exe my-tool    # Shows all matches in PATH order
+```
+
+---
+
+### Problem 4: Antivirus blocks the tool
+
+**Cause:** Windows Defender or enterprise AV flags unsigned executables.
+
+**This is more common than most CLI developers expect.** Enterprise Windows environments often have strict policies about unsigned code. A tool that works perfectly on a developer machine can silently fail in a corporate environment.
+
+---
+
+## winget and Chocolatey
+
+For distribution beyond npm, Windows users often use package managers.
+
+### winget (Windows Package Manager)
+
+Microsoft's official package manager, built into Windows 10/11.
+
+```powershell
+winget install MyOrg.MyTool
+winget upgrade MyOrg.MyTool
+winget uninstall MyOrg.MyTool
+```
+
+To publish to winget, you submit a manifest to the [winget-pkgs](https://github.com/microsoft/winget-pkgs) repo. The manifest specifies download URLs, checksums, and install behavior.
+
+```yaml
+PackageIdentifier: MyOrg.MyTool
+PackageVersion: 1.0.0
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://example.com/my-tool-1.0.0-win-x64.zip
+    InstallerSha256: <sha256>
+    InstallerType: zip
+```
+
+### Chocolatey
+
+Older but widely used in enterprise environments.
+
+```powershell
+choco install my-tool
+choco upgrade my-tool
+choco uninstall my-tool
+```
+
+Chocolatey packages are NuSpec manifests with PowerShell install scripts. Enterprise environments often have internal Chocolatey feeds.
+
+---
+
+## PATH behavior differences by install method
+
+| Install method | Where it lands | PATH update |
+|---|---|---|
+| `npm install -g` | `%APPDATA%\npm` | Set by Node installer |
+| winget | Varies by package | Usually automatic |
+| Chocolatey | `C:\ProgramData\chocolatey\bin` | Automatic |
+| Manual zip | Wherever user puts it | Manual |
+
+---
+
+## Quick Lab
+
+### Step 1 -- Check where global npm tools land
+
+```powershell
+npm config get prefix
+Get-ChildItem "$(npm config get prefix)"
+```
+
+### Step 2 -- Find all copies of a command on PATH
+
+```powershell
+where.exe node
+where.exe npm
+# where.exe shows ALL matches in PATH order, not just the first
+```
+
+### Step 3 -- Inspect a .ps1 wrapper
+
+```powershell
+Get-Content "$(npm config get prefix)\npx.ps1"
+```
+
+---
+
+## What to Notice
+
+- npm creates three wrapper files on Windows -- each for a different shell context
+- PATH order determines which version of a tool runs when duplicates exist
+- PowerShell execution policy blocks `.ps1` wrappers -- a common gotcha for end users
+- Enterprise environments add extra constraints (AV, signing, internal package feeds)
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- What npm creates when you install a global CLI on Windows and why
+- How to diagnose "command not found" after a successful install
+- How PowerShell execution policy affects CLI tools
+- The difference between winget, Chocolatey, and npm for distribution
+
+Strong answer:
+
+*"When npm installs a CLI globally on Windows, it creates .cmd and .ps1 wrappers so the tool works in both CMD and PowerShell. The most common issues I see are PATH not including the npm bin directory, and PowerShell execution policy blocking the .ps1 wrapper. Both are diagnosable quickly -- check npm config get prefix against $env:PATH, and check Get-ExecutionPolicy."*
+
+---
+
+<QuizSet
+  title="Windows CLI Distribution Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why does npm create a .ps1 wrapper when installing a CLI globally on Windows?",
+      options: [
+        "For performance reasons",
+        "Because PowerShell cannot run .cmd files",
+        "Because PowerShell cannot directly execute the Unix shebang in the CLI script",
+        "To enable antivirus scanning"
+      ],
+      answer: "Because PowerShell cannot directly execute the Unix shebang in the CLI script",
+      explanation: "Node CLI scripts use a Unix shebang that Windows shells can't process. npm generates .ps1 and .cmd wrappers so the tool works natively in PowerShell and CMD."
+    },
+    {
+      question: "A user installs your CLI globally but gets 'command not found'. What is the most likely cause?",
+      options: [
+        "The CLI has a bug",
+        "Node.js is not installed",
+        "The npm global bin directory is not on the user's PATH",
+        "The .cmd wrapper is corrupted"
+      ],
+      answer: "The npm global bin directory is not on the user's PATH",
+      explanation: "Even after a successful install, the tool won't be found if the npm prefix directory isn't in PATH. Check npm config get prefix against $env:PATH."
+    },
+    {
+      question: "What PowerShell command shows ALL matching executables in PATH order?",
+      options: [
+        "Get-Command",
+        "where.exe",
+        "which",
+        "Resolve-Path"
+      ],
+      answer: "where.exe",
+      explanation: "where.exe shows all matches for a command across all PATH entries in order. Get-Command only shows the first match. This is essential for diagnosing duplicate version conflicts."
+    }
+  ]}
+/>

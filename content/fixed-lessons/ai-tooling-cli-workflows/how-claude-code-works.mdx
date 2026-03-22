@@ -1,0 +1,319 @@
+# How Claude Code Works: The AI Engine Behind the CLI
+
+## Why this matters
+
+You are applying to build and maintain Claude Code. Understanding how it works
+at the architectural level -- how it talks to the model, how it manages context,
+how it decides what to do -- is foundational to this role. An interviewer will
+assume you have thought about this.
+
+This is not about becoming an AI researcher. It is about understanding the system
+you are engineering for well enough to reason about failures, design good Windows
+integrations, and talk fluently with the research and product teams you'll work
+alongside.
+
+---
+
+## Key Concepts
+
+- Claude Code is an agentic CLI -- it does not just answer questions, it takes actions
+- It communicates with Claude via the Anthropic API using a messages-based protocol
+- Context management is one of the hardest engineering problems in the system
+- Tool use is the mechanism by which the model interacts with the real world
+- Safety and human oversight are first-class engineering concerns, not afterthoughts
+
+---
+
+## The basic architecture
+
+At its core, Claude Code is a loop:
+
+```
+User types a message
+  ↓
+Claude Code sends a request to the Anthropic API
+  ↓
+Claude responds -- either with text OR a tool call
+  ↓
+If tool call: Claude Code executes the tool (read file, run command, etc.)
+  ↓
+Result is sent back to Claude as a new message
+  ↓
+Claude responds again
+  ↓
+Loop continues until Claude produces a final text response
+  ↓
+Claude Code displays the response to the user
+```
+
+This loop is called an **agentic loop** -- the model can take multiple steps,
+use multiple tools, and reason across several turns before finishing a task.
+
+---
+
+## The API: messages and roles
+
+Claude Code communicates with Claude via the Anthropic Messages API. Every
+request is a list of messages, each with a role:
+
+```typescript
+// Simplified -- real implementation has more fields
+const response = await anthropic.messages.create({
+  model: "claude-opus-4-5",
+  max_tokens: 8096,
+  system: "You are Claude Code, an AI coding assistant...",
+  messages: [
+    { role: "user",      content: "What files are in this directory?" },
+    { role: "assistant", content: [{ type: "tool_use", ... }] },
+    { role: "user",      content: [{ type: "tool_result", ... }] },
+    { role: "assistant", content: "The directory contains: ..." },
+    { role: "user",      content: "Now edit the main file to..." },
+  ]
+});
+```
+
+**The critical thing to understand:** the model has no persistent memory between
+API calls. Every single request includes the entire conversation history from
+the start of the session. Claude Code is responsible for maintaining, managing,
+and pruning that history.
+
+This is why context management is one of the hardest problems in the system --
+and why it is directly relevant to the Windows role. A session that accumulates
+too much context hits token limits and fails. The failure experience for the
+user is Claude Code suddenly stopping mid-task with a confusing error.
+
+---
+
+## Tool use: how the model interacts with the real world
+
+Claude cannot directly read files or run commands. Instead, it requests that
+Claude Code do these things on its behalf through **tool use**.
+
+The flow works like this:
+
+```
+1. Developer registers tools with the API call:
+   [read_file, write_file, run_command, list_directory, ...]
+
+2. Claude decides it needs to read a file and responds with:
+   { type: "tool_use", name: "read_file", input: { path: "src/index.ts" } }
+
+3. Claude Code receives this, reads the actual file from disk
+
+4. Claude Code sends the result back:
+   { type: "tool_result", content: "// file contents here..." }
+
+5. Claude sees the file contents and continues reasoning
+```
+
+**This is the mechanism behind every action Claude Code takes.** When it edits
+a file, runs a test, or executes a command -- it is always Claude requesting a
+tool call, and Claude Code executing it and reporting the result back.
+
+---
+
+## Why this matters for Windows specifically
+
+Every tool that touches the filesystem or runs a command has Windows-specific
+behavior that must be handled correctly:
+
+```typescript
+// Simplified tool implementation
+async function runCommand(command: string): Promise<ToolResult> {
+  // WINDOWS CONCERN: which shell executes this?
+  // On Unix: /bin/sh
+  // On Windows: depends on configuration -- cmd.exe? PowerShell? Git Bash?
+
+  // WINDOWS CONCERN: path separators in the command
+  // "cat src/index.ts" works on Unix
+  // "type src\index.ts" is the CMD equivalent
+  // "Get-Content src\index.ts" is PowerShell
+
+  // WINDOWS CONCERN: exit codes
+  // Windows and Unix have different conventions for some codes
+
+  const result = await exec(command);
+  return { output: result.stdout, error: result.stderr };
+}
+```
+
+When Claude generates a shell command that assumes Unix conventions -- which it
+will, because most training data is Unix-centric -- the tool layer is where
+Claude Code needs to catch and translate those assumptions for Windows.
+
+This is a core part of the Windows engineer's job: ensuring the tool
+implementations work correctly on Windows and that failures produce clear,
+debuggable errors rather than silent wrong behavior.
+
+---
+
+## The system prompt: how Claude Code's behavior is defined
+
+Before the user's first message, Claude Code sends a **system prompt** -- a
+large block of instructions that tells Claude what it is, what tools it has,
+how to behave, and what constraints to operate under.
+
+The system prompt includes things like:
+- What tools are available and how to use them
+- Safety constraints (ask before deleting files, confirm before running destructive commands)
+- How to format responses
+- Context about the current project (language, framework, conventions)
+- Operating system and shell information -- **this is where Windows context is injected**
+
+```typescript
+// Simplified system prompt construction
+function buildSystemPrompt(context: ProjectContext): string {
+  return `
+You are Claude Code, an AI coding assistant running in a CLI environment.
+
+Operating system: ${context.os}           // "Windows 11" or "macOS 14" etc.
+Shell: ${context.shell}                   // "PowerShell 7" or "bash" etc.
+Working directory: ${context.cwd}
+
+Available tools: read_file, write_file, run_command, list_directory...
+
+When running commands on Windows:
+- Use PowerShell syntax unless the user specifies otherwise
+- Use backslashes for file paths
+- Be aware that some Unix commands are not available
+
+Safety guidelines:
+- Always confirm before deleting files
+- Show the user what command you plan to run before executing it
+...
+  `;
+}
+```
+
+**The Windows engineer's role includes ensuring the system prompt correctly
+captures the Windows environment** -- so Claude generates Windows-appropriate
+commands rather than Unix commands that fail silently.
+
+---
+
+## Context limits and what happens when you hit them
+
+Every model has a **context window** -- a maximum number of tokens it can
+process in a single request. Claude's models have large context windows, but
+a long coding session with many tool calls, large file reads, and extensive
+conversation can approach that limit.
+
+When the context limit is approached, Claude Code has several strategies:
+
+```
+1. Summarization -- compress older conversation turns into a summary
+2. Pruning -- drop the least relevant earlier messages
+3. Truncation -- cut older content with a warning to the user
+4. Fail with a clear error -- tell the user the session is too long
+```
+
+**Why this matters for Windows:** Windows path strings are longer than Unix
+paths, Windows error messages are often more verbose, and Windows tool output
+(like PowerShell verbose output) tends to be wordier. A session that stays
+within context limits on macOS might hit them faster on Windows. The Windows
+engineer needs to be aware of this and ensure the tool implementations are
+efficient with their token usage.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Use Claude Code and observe the agentic loop
+
+```powershell
+# Start a Claude Code session and ask it to do something multi-step
+# Watch how it thinks through multiple tool calls before responding
+claude "read my package.json and tell me if any dependencies are outdated"
+```
+
+Notice how it reads the file first, then reasons about the contents.
+
+### Step 2 -- Observe tool calls explicitly
+
+```powershell
+# Claude Code has a verbose or debug mode -- check the docs
+# Or watch the terminal output carefully for tool call indicators
+claude --verbose "list all TypeScript files in src/"
+```
+
+### Step 3 -- Think about what happens on Windows vs Unix
+
+For any command Claude Code generates, ask yourself:
+- Would this command work in PowerShell?
+- Would this command work in CMD?
+- Are the path separators correct?
+- Does this assume a Unix tool that might not exist on Windows?
+
+---
+
+## What to Notice
+
+- Claude Code is a loop, not a single request -- it can take many steps
+- The model has no memory between sessions -- context is rebuilt every time
+- Every file operation and command goes through a tool layer Claude Code controls
+- The system prompt is where Windows context is injected -- bad system prompt = bad Windows behavior
+- Context limits are a real engineering constraint, not just a theoretical one
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- The basic agentic loop at a high level
+- What tool use is and how it connects the model to the real world
+- Why the tool implementations are where Windows-specific engineering lives
+- What the context window is and why it matters for a long coding session
+
+Strong answer:
+
+*"Claude Code is an agentic loop -- the model doesn't just answer questions, it
+uses tools to read files, run commands, and take actions, then reasons about the
+results. From a Windows engineering perspective, the tool layer is where most of
+the work lives. Every file read, write, and command execution has Windows-specific
+behavior that needs to be handled correctly. The system prompt is also important --
+that's where we inject context about the Windows environment so Claude generates
+Windows-appropriate commands rather than Unix commands that fail silently on
+Windows."*
+
+---
+
+<QuizSet
+  title="How Claude Code Works Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why does Claude Code send the entire conversation history with every API request?",
+      options: [
+        "To make requests larger and slower",
+        "Because the model has no persistent memory -- context must be provided fresh each time",
+        "Because the API requires it for billing",
+        "To allow the model to predict future messages"
+      ],
+      answer: "Because the model has no persistent memory -- context must be provided fresh each time",
+      explanation: "Claude has no memory between API calls. Claude Code is responsible for maintaining the conversation history and sending the relevant portion with each request. This is why context management is one of the hardest engineering problems in the system."
+    },
+    {
+      question: "When Claude Code reads a file, what actually happens mechanically?",
+      options: [
+        "Claude directly accesses the filesystem",
+        "Claude requests a tool call, Claude Code executes it and sends the result back",
+        "The file is uploaded to Anthropic's servers",
+        "Claude Code guesses the file contents from context"
+      ],
+      answer: "Claude requests a tool call, Claude Code executes it and sends the result back",
+      explanation: "Claude cannot directly access the filesystem. It responds with a tool_use block requesting that Claude Code read the file. Claude Code does the actual file read and sends the contents back as a tool_result message."
+    },
+    {
+      question: "Where in Claude Code's architecture is Windows-specific context about the shell and OS injected?",
+      options: [
+        "In every individual tool call",
+        "In the system prompt sent before the first user message",
+        "In a separate Windows configuration file",
+        "It is not injected -- Claude figures it out automatically"
+      ],
+      answer: "In the system prompt sent before the first user message",
+      explanation: "The system prompt is built before the session starts and includes OS, shell, and environment context. This is what tells Claude to generate Windows-appropriate commands rather than Unix commands that would fail on Windows."
+    }
+  ]}
+/>

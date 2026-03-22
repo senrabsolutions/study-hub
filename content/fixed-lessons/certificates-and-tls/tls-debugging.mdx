@@ -1,0 +1,275 @@
+# Debugging TLS and Certificate Errors in CLI Tools
+
+## Why this matters
+
+SSL/TLS errors are one of the most frustrating CLI failures for Windows users. They appear as cryptic messages like `UNABLE_TO_VERIFY_LEAF_SIGNATURE` or `SELF_SIGNED_CERT_IN_CHAIN`, and users have no idea what to do.
+
+As a Windows platform engineer for a CLI tool, you will encounter these in enterprise environments where corporate proxies intercept TLS traffic, in development environments with self-signed certs, and in Windows trust store mismatches.
+
+---
+
+## Key Concepts
+
+- TLS errors mean Node.js couldn't verify the server's certificate
+- Node.js maintains its **own** certificate store -- separate from Windows
+- Enterprise environments often use corporate CAs that aren't in Node's store
+- You should never disable TLS verification in production
+
+---
+
+## How TLS verification works
+
+When your CLI makes an HTTPS request, Node.js:
+
+1. Connects to the server
+2. Receives the server's certificate chain
+3. Checks the chain against its **built-in CA bundle** (from the `ca-certificates` package bundled with Node)
+4. If the chain doesn't trace back to a trusted root CA → error
+
+The key issue on Windows: **Node does not use the Windows certificate store by default.** A certificate that Windows trusts completely may still cause Node to throw.
+
+---
+
+## Common TLS errors and what they mean
+
+### `UNABLE_TO_VERIFY_LEAF_SIGNATURE`
+
+The server's certificate exists but Node can't verify the signing chain. Usually means an intermediate certificate is missing or the root CA isn't in Node's bundle.
+
+```
+Error: unable to verify the first certificate
+    at TLSSocket.onConnectEnd (_tls_wrap.js:...)
+```
+
+---
+
+### `SELF_SIGNED_CERT_IN_CHAIN`
+
+A self-signed certificate appears somewhere in the chain. Common in:
+- Internal development servers
+- Corporate proxies that perform TLS inspection
+
+```
+Error: self signed certificate in certificate chain
+```
+
+---
+
+### `CERT_HAS_EXPIRED`
+
+The certificate's `notAfter` date has passed.
+
+```
+Error: certificate has expired
+```
+
+---
+
+### `ERR_TLS_CERT_ALTNAME_INVALID`
+
+The hostname doesn't match the certificate's Subject Alternative Names (SANs).
+
+```
+Error: Hostname/IP does not match certificate's altnames
+```
+
+---
+
+## The corporate proxy problem
+
+This is the most common enterprise Windows issue.
+
+Many corporate environments deploy a **TLS-intercepting proxy**:
+
+```
+Your CLI → Corporate Proxy (re-signs with corporate CA) → Internet
+```
+
+The proxy decrypts your HTTPS traffic, inspects it, then re-encrypts it with a corporate CA certificate. From Node's perspective, every HTTPS connection now has a certificate signed by an unknown CA -- and Node throws.
+
+**How to identify this:**
+
+```powershell
+# Check if a proxy is configured
+$env:HTTPS_PROXY
+$env:HTTP_PROXY
+netsh winhttp show proxy
+```
+
+**The fix -- add the corporate CA to Node:**
+
+```powershell
+# Get the corporate CA cert (usually available from IT or extractable from browser)
+# Then point Node at it:
+$env:NODE_EXTRA_CA_CERTS = "C:\path\to\corporate-ca.crt"
+```
+
+Or in your tool's configuration:
+```typescript
+import { readFileSync } from "fs";
+import https from "https";
+
+const agent = new https.Agent({
+  ca: readFileSync("C:\\path\\to\\corporate-ca.crt"),
+});
+```
+
+---
+
+## Debugging TLS errors step by step
+
+### Step 1 -- Get the actual certificate chain
+
+```powershell
+# Using openssl (if available via Git Bash or WSL)
+openssl s_client -connect api.anthropic.com:443 -showcerts
+
+# Or use PowerShell
+$request = [System.Net.WebRequest]::Create("https://api.anthropic.com")
+$response = $request.GetResponse()
+$cert = $request.ServicePoint.Certificate
+Write-Output $cert
+```
+
+### Step 2 -- Check Node's TLS behavior directly
+
+```javascript
+// test-tls.js
+const https = require("https");
+
+https.get("https://api.anthropic.com", (res) => {
+  console.log("Success:", res.statusCode);
+  const cert = res.socket.getPeerCertificate(true);
+  console.log("Issuer:", cert.issuer);
+  console.log("Subject:", cert.subject);
+}).on("error", (err) => {
+  console.error("TLS Error:", err.message);
+  console.error("Code:", err.code);
+});
+```
+
+### Step 3 -- Check the Windows certificate store
+
+```powershell
+# List trusted root CAs in Windows
+Get-ChildItem Cert:\LocalMachine\Root | Select-Object Subject, Thumbprint, NotAfter
+
+# Check if a specific cert exists
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*Corporate*" }
+```
+
+### Step 4 -- Use NODE_EXTRA_CA_CERTS
+
+```powershell
+$env:NODE_EXTRA_CA_CERTS = "C:\certs\corporate-ca.crt"
+node test-tls.js
+```
+
+---
+
+## What you should never do
+
+```javascript
+// NEVER do this -- it disables all TLS verification
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+// Or this
+const agent = new https.Agent({ rejectUnauthorized: false });
+```
+
+This is sometimes suggested online as a "quick fix." It eliminates all TLS protection and should never appear in production code. If you see it in a codebase, flag it.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Trigger a TLS error intentionally
+
+```powershell
+# Run against a self-signed cert test site
+node -e "require('https').get('https://self-signed.badssl.com/', r => console.log(r.statusCode)).on('error', e => console.error(e.message))"
+```
+
+### Step 2 -- See what certs Node trusts
+
+```javascript
+// list-cas.js
+const tls = require("tls");
+const certs = tls.rootCertificates;
+console.log(`Node trusts ${certs.length} root CAs`);
+console.log(certs[0].substring(0, 80)); // First cert
+```
+
+### Step 3 -- Check proxy settings
+
+```powershell
+$env:HTTPS_PROXY
+$env:HTTP_PROXY
+netsh winhttp show proxy
+```
+
+---
+
+## What to Notice
+
+- Node's CA bundle is separate from Windows -- corporate CAs require explicit configuration
+- `NODE_EXTRA_CA_CERTS` is the safe, correct way to add custom CAs
+- TLS errors in enterprise environments are almost always a corporate proxy or missing CA
+- The error code (e.g., `SELF_SIGNED_CERT_IN_CHAIN`) tells you exactly what's wrong
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- Why a certificate trusted by Windows might still fail in Node.js
+- What a TLS-intercepting corporate proxy does and how to configure Node for it
+- The difference between the common TLS error codes
+- Why `NODE_TLS_REJECT_UNAUTHORIZED=0` is dangerous
+
+Strong answer:
+
+*"Node.js maintains its own certificate store separately from Windows. In enterprise environments, corporate proxies often perform TLS inspection using an internal CA that Node doesn't know about. The right fix is NODE_EXTRA_CA_CERTS pointing at the corporate CA cert -- not disabling TLS verification, which should never happen in production code."*
+
+---
+
+<QuizSet
+  title="TLS and Certificates Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why might a certificate trusted by Windows fail in a Node.js CLI?",
+      options: [
+        "Node.js doesn't support TLS",
+        "Node.js maintains its own CA bundle separate from the Windows certificate store",
+        "Windows certificates are incompatible with HTTPS",
+        "Node.js only trusts self-signed certificates"
+      ],
+      answer: "Node.js maintains its own CA bundle separate from the Windows certificate store",
+      explanation: "Node bundles its own set of trusted root CAs and does not read from the Windows certificate store by default. Certificates added to Windows (like corporate CAs) won't be trusted by Node without explicit configuration."
+    },
+    {
+      question: "What does SELF_SIGNED_CERT_IN_CHAIN usually indicate in a corporate environment?",
+      options: [
+        "The server has an expired certificate",
+        "A TLS-intercepting proxy is re-signing traffic with a corporate CA",
+        "The DNS lookup failed",
+        "The port is blocked by a firewall"
+      ],
+      answer: "A TLS-intercepting proxy is re-signing traffic with a corporate CA",
+      explanation: "Corporate proxies decrypt and re-encrypt HTTPS traffic using an internal CA. Node sees a certificate chain that includes this unknown CA and throws SELF_SIGNED_CERT_IN_CHAIN."
+    },
+    {
+      question: "What is the correct way to add a corporate CA certificate to Node.js?",
+      options: [
+        "Set NODE_TLS_REJECT_UNAUTHORIZED=0",
+        "Set NODE_EXTRA_CA_CERTS to the path of the CA certificate file",
+        "Reinstall Node.js",
+        "Add the certificate to the Windows registry"
+      ],
+      answer: "Set NODE_EXTRA_CA_CERTS to the path of the CA certificate file",
+      explanation: "NODE_EXTRA_CA_CERTS tells Node to trust additional CA certificates on top of its built-in bundle. This is the safe, correct approach -- unlike disabling TLS verification entirely."
+    }
+  ]}
+/>

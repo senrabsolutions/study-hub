@@ -1,0 +1,283 @@
+# CLI Frameworks: Commander, Yargs, and Oclif
+
+## Why this matters
+
+Raw `process.argv` parsing gets unmanageable fast. Real CLI tools need subcommands, flags, validation, help text, and version output. CLI frameworks handle all of that so you can focus on what your commands actually do.
+
+Claude Code is a complex CLI with multiple subcommands and options. Understanding how frameworks like these work -- how they parse arguments, generate help, handle errors -- is essential for working in that codebase.
+
+---
+
+## Key Concepts
+
+- CLI frameworks handle argument parsing, command routing, and help generation
+- The three dominant choices in the Node/TypeScript ecosystem are **Commander**, **Yargs**, and **Oclif**
+- Each makes different tradeoffs around complexity, TypeScript support, and plugin architecture
+- Knowing the differences helps you understand why a codebase made its choices
+
+---
+
+## Commander
+
+The most widely used Node CLI framework. Simple, lightweight, well-typed.
+
+```typescript
+import { Command } from "commander";
+
+const program = new Command();
+
+program
+  .name("my-tool")
+  .description("A CLI tool")
+  .version("1.0.0");
+
+program
+  .command("run <file>")
+  .description("Run a file")
+  .option("-v, --verbose", "Enable verbose output")
+  .option("--timeout <ms>", "Timeout in milliseconds", "5000")
+  .action((file, options) => {
+    console.log(`Running ${file}`);
+    if (options.verbose) console.log("Verbose mode on");
+    console.log(`Timeout: ${options.timeout}ms`);
+  });
+
+program.parse(process.argv);
+```
+
+Running `my-tool --help` automatically generates:
+
+```
+Usage: my-tool [options] [command]
+
+A CLI tool
+
+Options:
+  -V, --version   output the version number
+  -h, --help      display help for command
+
+Commands:
+  run <file>      Run a file
+```
+
+**Strengths:** Simple API, excellent TypeScript types, widely understood.
+**Weaknesses:** Less structured for very large CLIs with many commands.
+
+---
+
+## Yargs
+
+More configuration-driven. Popular for tools that need heavy argument validation.
+
+```typescript
+import yargs from "yargs";
+import { hideBin } from "yargs/helpers";
+
+yargs(hideBin(process.argv))
+  .command(
+    "run <file>",
+    "Run a file",
+    (yargs) => {
+      return yargs
+        .positional("file", {
+          describe: "File to run",
+          type: "string",
+        })
+        .option("verbose", {
+          alias: "v",
+          type: "boolean",
+          description: "Enable verbose output",
+        });
+    },
+    (argv) => {
+      console.log(`Running ${argv.file}`);
+    }
+  )
+  .help()
+  .parse();
+```
+
+**Strengths:** Rich validation, middleware support, good for complex argument schemas.
+**Weaknesses:** Verbose config, TypeScript types can be tricky.
+
+---
+
+## Oclif
+
+Salesforce's framework. Plugin architecture, designed for large CLI products.
+
+```typescript
+import { Command, Flags } from "@oclif/core";
+
+export default class Run extends Command {
+  static description = "Run a file";
+
+  static flags = {
+    verbose: Flags.boolean({ char: "v", description: "Verbose output" }),
+  };
+
+  static args = [{ name: "file", required: true }];
+
+  async run() {
+    const { args, flags } = await this.parse(Run);
+    this.log(`Running ${args.file}`);
+    if (flags.verbose) this.log("Verbose mode on");
+  }
+}
+```
+
+**Strengths:** Plugin system, excellent for large multi-command CLIs, built-in update management.
+**Weaknesses:** Heavy, opinionated structure, overkill for simple tools.
+
+---
+
+## How argument parsing actually works
+
+Under the hood, all these frameworks do the same thing: parse `process.argv`.
+
+```
+my-tool run file.ts --verbose --timeout 3000
+```
+
+`process.argv` looks like:
+```
+['node', '/path/to/my-tool', 'run', 'file.ts', '--verbose', '--timeout', '3000']
+```
+
+The framework:
+1. Strips the first two entries (`node` and the script path)
+2. Identifies the subcommand (`run`)
+3. Separates positional args (`file.ts`) from flags (`--verbose`, `--timeout 3000`)
+4. Validates types and required fields
+5. Calls your handler with a typed object
+
+---
+
+## Windows-specific considerations
+
+**Shell quoting differences matter here.** CMD, PowerShell, and bash handle quoting differently, and this affects how arguments reach your parser.
+
+```powershell
+# PowerShell -- this works as expected
+my-tool run "my file.ts" --message "hello world"
+
+# CMD -- double quotes work
+my-tool run "my file.ts" --message "hello world"
+
+# PowerShell with special characters -- can require escaping
+my-tool run file.ts --filter "*.ts"  # glob may be expanded by shell
+```
+
+When debugging argument issues on Windows, always check what `process.argv` actually contains -- the shell may have transformed the input before Node sees it.
+
+```typescript
+// Add this temporarily to debug
+console.log("Raw args:", process.argv.slice(2));
+```
+
+---
+
+## Quick Lab
+
+### Step 1 -- Install Commander and try it
+
+```powershell
+mkdir cli-test
+cd cli-test
+npm init -y
+npm install commander
+```
+
+Create `index.js`:
+```javascript
+const { Command } = require("commander");
+const program = new Command();
+
+program
+  .command("hello <name>")
+  .option("--shout", "Uppercase the output")
+  .action((name, options) => {
+    const msg = `Hello, ${name}!`;
+    console.log(options.shout ? msg.toUpperCase() : msg);
+  });
+
+program.parse(process.argv);
+```
+
+```powershell
+node index.js hello world
+node index.js hello world --shout
+node index.js --help
+```
+
+### Step 2 -- Inspect raw argv
+
+```powershell
+node -e "console.log(process.argv)" -- --flag value "spaced arg"
+```
+
+---
+
+## What to Notice
+
+- `--help` output is generated automatically -- the framework reads your command definitions
+- Positional args and flags are handled differently under the hood
+- Windows shells can mangle arguments before Node sees them -- always check raw `process.argv` when debugging
+- The framework you're working with shapes how the entire codebase is organized
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- The difference between Commander, Yargs, and Oclif and when you'd use each
+- How argument parsing works at the `process.argv` level
+- Why Windows shell quoting can affect argument parsing
+- How to debug argument issues on Windows
+
+Strong answer:
+
+*"I'd reach for Commander for most tools -- it's simple, well-typed, and widely understood. For something the size of Claude Code with plugins and extensions, Oclif's structure makes more sense. The important thing to understand is that all these frameworks are ultimately parsing process.argv, so when something breaks on Windows, the first thing I check is what the shell actually passed in."*
+
+---
+
+<QuizSet
+  title="CLI Frameworks Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What do CLI frameworks like Commander and Yargs ultimately parse?",
+      options: [
+        "The operating system registry",
+        "process.argv",
+        "Environment variables only",
+        "stdin exclusively"
+      ],
+      answer: "process.argv",
+      explanation: "All CLI frameworks are built on top of process.argv -- they just provide structure, validation, and help generation around it."
+    },
+    {
+      question: "Why might arguments behave differently on Windows vs Linux?",
+      options: [
+        "Node.js works differently on each OS",
+        "The shell processes and potentially transforms arguments before Node sees them",
+        "Commander only supports Linux",
+        "Windows doesn't support process.argv"
+      ],
+      answer: "The shell processes and potentially transforms arguments before Node sees them",
+      explanation: "CMD and PowerShell handle quoting and special characters differently than bash. The shell transforms input before handing it to Node, so process.argv may differ across platforms."
+    },
+    {
+      question: "Which framework is best suited for a large CLI product with a plugin architecture?",
+      options: [
+        "Commander",
+        "Yargs",
+        "Oclif",
+        "Raw process.argv"
+      ],
+      answer: "Oclif",
+      explanation: "Oclif is designed for large, extensible CLI products and includes a plugin system, update management, and command class structure suited to teams building CLI platforms."
+    }
+  ]}
+/>

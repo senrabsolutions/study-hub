@@ -1,0 +1,201 @@
+# Windows Package Management (winget vs Chocolatey vs Scoop)
+
+## Why this matters
+
+CLI tools don’t just need to be built -- they need to be **installed, updated, and managed**.
+
+On Windows, this is handled by package managers like:
+
+- winget
+- Chocolatey
+- Scoop
+
+If you don’t understand these, you’ll struggle with:
+
+- distributing CLI tools
+- managing dependencies
+- keeping tools up to date
+- debugging installation issues
+
+---
+
+## Key Concepts
+
+### winget (Windows Package Manager)
+
+- Built into modern Windows
+- Maintained by Microsoft
+- Uses official repositories
+- Focuses on simplicity and reliability
+
+Example:
+
+```powershell
+winget install nodejs
+```
+
+---
+
+### Chocolatey
+
+- Community-driven package manager
+- Uses PowerShell scripts for installs
+- Very flexible and widely used
+
+Example:
+
+```powershell
+choco install nodejs
+```
+
+---
+
+### Scoop
+
+- Focuses on developer tools
+- Installs apps into user directories (no admin required)
+- Avoids system-wide changes
+
+Example:
+
+```powershell
+scoop install nodejs
+```
+
+---
+
+## Quick Summary
+
+Windows has multiple package managers, each with different strengths. Choosing the right one depends on use case, permissions, and environment.
+
+---
+
+## Comparison
+
+| Feature        | winget            | Chocolatey         | Scoop              |
+|----------------|------------------|-------------------|--------------------|
+| Maintainer     | Microsoft        | Community         | Community          |
+| Requires Admin | Usually          | Usually           | No                 |
+| Scope          | System-wide      | System-wide       | User-level         |
+| Flexibility    | Moderate         | High              | Moderate           |
+| Use Case       | General installs | Automation        | Dev environments   |
+
+---
+
+## Quick Lab
+
+### Step 1 -- Check available packages
+
+```powershell
+winget search node
+```
+
+### Step 2 -- Install a tool
+
+```powershell
+winget install Git.Git
+```
+
+### Step 3 -- Verify installation
+
+```powershell
+git --version
+```
+
+---
+
+## What to Notice
+
+- Different managers install tools differently
+- Installation paths may vary
+- PATH updates may require a new terminal
+- Admin vs user installs affect permissions
+
+---
+
+## Real-World Example
+
+A developer installs a CLI tool with Scoop.
+
+- It works for them
+- It fails for another user on the same machine
+
+Why?
+
+Because Scoop installs tools **per-user**, not system-wide.
+
+---
+
+## Debugging Strategy
+
+When a tool doesn’t work after install:
+
+1. Check which package manager was used
+2. Verify installation path
+3. Check PATH:
+
+```powershell
+$env:PATH
+```
+
+4. Restart terminal if needed
+5. Confirm whether install was:
+   - system-wide
+   - user-only
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- Windows has multiple package managers with different trade-offs
+- Installation scope affects behavior
+- PATH and environment updates are critical
+- Tool distribution strategy depends on the environment
+
+Strong answer example:
+
+“Windows has several package managers like winget, Chocolatey, and Scoop. They differ in scope, permissions, and flexibility. For example, Scoop installs tools at the user level, while winget and Chocolatey typically install system-wide. These differences affect PATH, permissions, and how tools are used.”
+
+---
+
+<QuizSet
+  title="Package Management Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Which package manager is built into modern Windows?",
+      options: [
+        "Chocolatey",
+        "Scoop",
+        "winget",
+        "npm"
+      ],
+      answer: "winget",
+      explanation: "winget is maintained by Microsoft and included in modern Windows."
+    },
+    {
+      question: "What is a key feature of Scoop?",
+      options: [
+        "Requires admin access",
+        "Installs system-wide only",
+        "Installs tools in user space without admin rights",
+        "Only works with GUI apps"
+      ],
+      answer: "Installs tools in user space without admin rights",
+      explanation: "Scoop installs tools locally for the user, avoiding admin requirements."
+    },
+    {
+      question: "Why might a tool installed with Scoop not work for another user?",
+      options: [
+        "Because Scoop is broken",
+        "Because it installs tools per-user",
+        "Because Windows blocks it",
+        "Because PATH is disabled"
+      ],
+      answer: "Because it installs tools per-user",
+      explanation: "Scoop installations are user-specific, not system-wide."
+    }
+  ]}
+/>

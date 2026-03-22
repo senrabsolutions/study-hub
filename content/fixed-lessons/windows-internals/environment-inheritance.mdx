@@ -1,0 +1,217 @@
+# Environment Inheritance
+
+## Why this matters
+
+One of the most confusing real-world issues:
+
+> “This works in my terminal, but not in my script or tool.”
+
+This is often caused by **environment inheritance**.
+
+Every process inherits environment variables from its parent. If that environment is different, behavior changes -- even for the same command.
+
+---
+
+## Key Concepts
+
+- Processes do not create environments from scratch  
+- A child process **inherits** environment variables from its parent  
+- This includes:
+  - PATH  
+  - HOME / USERPROFILE  
+  - custom variables  
+
+- Once a process starts, its environment is **fixed**
+
+---
+
+## Quick Summary
+
+Child processes inherit their environment from the parent process. Differences in parent environments lead to inconsistent CLI behavior.
+
+---
+
+## Real-World Scenario
+
+You run:
+
+```bash
+node script.js
+```
+
+Inside the script, it runs:
+
+```bash
+git --version
+```
+
+Result:
+
+```
+git: command not found
+```
+
+But running `git --version` directly in your terminal works.
+
+---
+
+## Why This Happens
+
+- Your terminal has Git in PATH  
+- The script (or parent process) does not  
+- The subprocess inherits the script’s environment -- not your interactive shell’s  
+
+---
+
+## Quick Lab
+
+### Step 1 -- Print environment in Node
+
+```bash
+node -e "console.log(process.env.PATH)"
+```
+
+---
+
+### Step 2 -- Compare with shell
+
+#### CMD
+
+```bat
+echo %PATH%
+```
+
+#### PowerShell
+
+```powershell
+$env:PATH
+```
+
+---
+
+### Step 3 -- Spawn a subprocess
+
+```bash
+node -e "require('child_process').exec('where git', (e,o)=>console.log(o||e))"
+```
+
+---
+
+## What to Notice
+
+- PATH may differ between environments  
+- subprocess behavior depends on parent process  
+- tools launched from IDEs may behave differently  
+- restarting environments can change behavior  
+
+---
+
+## Deep Dive (Important)
+
+When a process starts:
+
+1. It inherits environment variables from its parent  
+2. That environment becomes **frozen** for that process  
+3. Any subprocess inherits from *that* environment  
+
+This creates chains like:
+
+```text
+Terminal → Node script → subprocess
+```
+
+Each level depends on the previous one.
+
+---
+
+## Real-World Example
+
+VS Code is opened before Git is installed.
+
+Later:
+
+- Git is added to PATH  
+- Terminal (new) sees Git  
+- VS Code (already running) does not  
+
+Result:
+- scripts inside VS Code fail  
+- terminal works  
+
+---
+
+## Debugging Strategy
+
+When behavior differs between environments:
+
+1. Print environment variables:
+
+```js
+console.log(process.env.PATH)
+```
+
+2. Compare:
+   - terminal vs script  
+   - CMD vs PowerShell  
+   - IDE vs standalone terminal  
+
+3. Restart parent processes (VS Code, terminals)
+
+4. Verify installation paths
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- Child processes inherit environment variables from parent processes  
+- Environment differences cause inconsistent behavior  
+- PATH issues often come from inheritance problems  
+- Restarting parent processes can resolve issues  
+
+Strong answer:
+
+“Environment inheritance means child processes receive the parent’s environment variables. If a tool behaves differently in different contexts, it’s often because the parent process has a different PATH or environment configuration.”
+
+---
+
+<QuizSet
+  title="Environment Inheritance Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Where do child processes get their environment variables?",
+      options: [
+        "From the OS only",
+        "From the parent process",
+        "From the registry only",
+        "From PowerShell only"
+      ],
+      answer: "From the parent process",
+      explanation: "Child processes inherit environment variables from their parent."
+    },
+    {
+      question: "Why might a command work in a terminal but fail in a script?",
+      options: [
+        "Because scripts run slower",
+        "Because the environments differ",
+        "Because PATH is ignored",
+        "Because Node blocks commands"
+      ],
+      answer: "Because the environments differ",
+      explanation: "Different environments can lead to different behavior."
+    },
+    {
+      question: "Why does restarting VS Code sometimes fix CLI issues?",
+      options: [
+        "It clears files",
+        "It reloads environment variables",
+        "It reinstalls software",
+        "It resets permissions"
+      ],
+      answer: "It reloads environment variables",
+      explanation: "Restarting allows the process to inherit updated environment variables."
+    }
+  ]}
+/>

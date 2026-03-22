@@ -1,0 +1,165 @@
+# Windows Registry Basics
+
+## Why this matters
+
+The Windows Registry is a central configuration system used by:
+
+- the operating system
+- installed applications
+- CLI tools
+- installers and package managers
+
+If something behaves differently than expected, the answer is often in the registry.
+
+Understanding the registry helps you debug:
+
+- applications reading the wrong configuration
+- tools behaving differently per user vs system-wide
+- install and uninstall issues
+- environment variable inconsistencies
+
+---
+
+## Key Concepts
+
+- The registry is a **hierarchical key-value store**
+- Top-level sections are called **hives**, including:
+  - `HKEY_LOCAL_MACHINE (HKLM)` → system-wide settings
+  - `HKEY_CURRENT_USER (HKCU)` → user-specific settings
+- Keys are like folders, values are like files
+- Values can store different types (strings, numbers, etc.)
+- Many system settings and environment variables are stored here
+
+---
+
+## Quick Summary
+
+The Windows Registry stores configuration data for both the system and applications. Many behaviors that seem “hardcoded” are actually controlled through registry values.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Open registry editor
+
+```powershell
+regedit
+```
+
+### Step 2 -- Navigate to environment variables
+
+Go to:
+
+```
+HKEY_CURRENT_USER\Environment
+```
+
+### Step 3 -- View PATH
+
+Look for a value named:
+
+```
+Path
+```
+
+---
+
+## What to Notice
+
+- Environment variables exist in both:
+  - user scope (HKCU)
+  - system scope (HKLM)
+- The effective PATH is a combination of both
+- Changes here often require a new process (or restart) to take effect
+- Registry edits directly affect system behavior
+
+---
+
+## Real-World Example
+
+You install a CLI tool using a package manager.
+
+- The installer updates PATH in the registry
+- New terminals can access the tool
+- Old terminals cannot
+
+Why?
+
+Because the updated PATH lives in the registry, but existing processes already inherited the old environment.
+
+---
+
+## Debugging Strategy
+
+When debugging system behavior:
+
+1. Check if the setting exists in:
+   - HKCU (user)
+   - HKLM (system)
+2. Verify whether the issue is:
+   - per-user
+   - system-wide
+3. Use command-line tools:
+
+```powershell
+Get-ItemProperty "HKCU:\Environment"
+```
+
+4. Confirm whether a restart is required
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- The registry is a hierarchical configuration database
+- It separates user and system settings
+- Many environment variables originate from the registry
+- Behavior differences often come from HKCU vs HKLM differences
+
+Strong answer example:
+
+“Windows stores many configuration values in the registry, including environment variables. User-level settings are stored in HKCU, while system-wide settings are in HKLM. Differences between these scopes can cause tools to behave differently depending on context.”
+
+---
+
+<QuizSet
+  title="Registry Basics Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the Windows Registry?",
+      options: [
+        "A file storage system",
+        "A hierarchical configuration database",
+        "A network protocol",
+        "A command-line shell"
+      ],
+      answer: "A hierarchical configuration database",
+      explanation: "The registry stores configuration data for the OS and applications."
+    },
+    {
+      question: "What is the difference between HKCU and HKLM?",
+      options: [
+        "They are identical",
+        "HKCU is user-specific, HKLM is system-wide",
+        "HKCU is for files, HKLM is for memory",
+        "HKLM is deprecated"
+      ],
+      answer: "HKCU is user-specific, HKLM is system-wide",
+      explanation: "HKCU stores settings for the current user, while HKLM stores system-wide settings."
+    },
+    {
+      question: "Why might a registry change not immediately affect a CLI tool?",
+      options: [
+        "Because registry changes are ignored",
+        "Because processes must be restarted to inherit new values",
+        "Because only administrators can read the registry",
+        "Because CLI tools do not use environment variables"
+      ],
+      answer: "Because processes must be restarted to inherit new values",
+      explanation: "Processes inherit environment values at launch, so changes require a restart."
+    }
+  ]}
+/>

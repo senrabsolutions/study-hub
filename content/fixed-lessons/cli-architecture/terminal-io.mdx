@@ -1,0 +1,166 @@
+# Terminal I/O (stdin, stdout, stderr)
+
+## Why this matters
+
+CLI tools don’t just take input -- they **communicate**.
+
+Understanding terminal I/O is critical for:
+
+- piping commands together (`|`)
+- handling input from other tools
+- producing usable output
+- debugging failures
+
+If you don’t understand stdin, stdout, and stderr, you can’t fully understand how CLI tools interact.
+
+---
+
+## Key Concepts
+
+- CLI programs communicate using three streams:
+
+  - **stdin (standard input)** → data coming *into* the program  
+  - **stdout (standard output)** → normal output  
+  - **stderr (standard error)** → error messages  
+
+- These streams can be redirected or piped between programs
+
+- Example:
+
+```bash
+command1 | command2
+```
+
+- Output of `command1` becomes input of `command2`
+
+---
+
+## Quick Summary
+
+CLI tools read input from stdin, write normal output to stdout, and write errors to stderr. These streams enable chaining tools together.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Output to stdout
+
+```bash
+echo "hello world"
+```
+
+### Step 2 -- Pipe output
+
+```bash
+echo "hello world" | findstr hello
+```
+
+### Step 3 -- Node example
+
+```bash
+node -e "process.stdout.write('output\n'); process.stderr.write('error\n');"
+```
+
+---
+
+## What to Notice
+
+- stdout and stderr are separate streams
+- piping (`|`) only passes stdout, not stderr
+- CLI tools can be chained together using these streams
+- tools behave differently depending on how input is provided
+
+---
+
+## Real-World Example
+
+A CLI tool outputs logs:
+
+```bash
+mytool run > output.log
+```
+
+Errors still appear in the terminal.
+
+Why?
+
+Because:
+- stdout is redirected to a file
+- stderr is not
+
+---
+
+## Debugging Strategy
+
+When debugging CLI behavior:
+
+1. Check what is being written to stdout vs stderr
+2. Test commands with piping
+3. Redirect output to inspect behavior:
+
+```bash
+command > out.txt
+command 2> error.txt
+```
+
+4. Confirm whether input is coming from:
+   - user input
+   - another command
+   - a file
+
+---
+
+## Interview Angle
+
+You should be able to explain:
+
+- CLI tools use stdin, stdout, and stderr for communication
+- stdout is used for normal output, stderr for errors
+- piping connects stdout of one tool to stdin of another
+- proper stream usage makes tools composable
+
+Strong answer example:
+
+“CLI tools communicate through standard streams. stdout is used for normal output, stderr for errors, and stdin for input. This allows tools to be composed using pipes, which is a core part of CLI design.”
+
+---
+
+<QuizSet
+  title="Terminal I/O Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What does stdout represent?",
+      options: [
+        "Input to a program",
+        "Normal output from a program",
+        "Error messages only",
+        "Registry data"
+      ],
+      answer: "Normal output from a program",
+      explanation: "stdout is used for standard program output."
+    },
+    {
+      question: "What happens when you use a pipe (|)?",
+      options: [
+        "It deletes output",
+        "It sends stdout of one command to stdin of another",
+        "It combines files",
+        "It modifies environment variables"
+      ],
+      answer: "It sends stdout of one command to stdin of another",
+      explanation: "Pipes connect the output of one program to the input of another."
+    },
+    {
+      question: "Why are stderr and stdout separate?",
+      options: [
+        "For performance reasons only",
+        "So errors can be handled or redirected independently",
+        "Because Windows requires it",
+        "To reduce memory usage"
+      ],
+      answer: "So errors can be handled or redirected independently",
+      explanation: "Separating stderr allows better debugging and control over output."
+    }
+  ]}
+/>

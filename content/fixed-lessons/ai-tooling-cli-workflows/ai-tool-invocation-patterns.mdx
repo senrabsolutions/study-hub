@@ -1,0 +1,393 @@
+# Tool Invocation Patterns in Claude Code
+
+## Why this matters
+
+Tool use is the mechanism by which Claude Code interacts with the real world.
+Every file read, every command execution, every edit -- all of it goes through
+tools. Understanding how tools are defined, invoked, and validated is essential
+for the Windows engineer role because **the tool implementations are where
+Windows-specific bugs live.**
+
+When Claude Code works perfectly on macOS and breaks on Windows, the bug is
+almost always in a tool implementation -- a path that uses the wrong separator,
+a command that assumes bash, a file operation that doesn't account for Windows
+permission models.
+
+---
+
+## Key Concepts
+
+- Tools are defined as JSON schemas that describe their name, inputs, and expected behavior
+- Claude decides which tool to call based on the task -- the engineer doesn't hardcode sequences
+- Tool results feed back into the context -- the model reasons about them before continuing
+- Safety constraints are enforced at the tool layer, not by hoping the model behaves
+- Windows-specific tool behavior must be tested explicitly -- it will not just work
+
+---
+
+## How tools are defined
+
+Every tool Claude Code can use is registered as a schema in the API request:
+
+```typescript
+const tools = [
+  {
+    name: "read_file",
+    description: "Read the contents of a file at the given path. Returns the file contents as a string.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "The path to the file to read. Can be absolute or relative to the working directory."
+        }
+      },
+      required: ["path"]
+    }
+  },
+  {
+    name: "write_file",
+    description: "Write content to a file. Creates the file if it does not exist. Overwrites if it does.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path to write to" },
+        content: { type: "string", description: "Content to write" }
+      },
+      required: ["path", "content"]
+    }
+  },
+  {
+    name: "run_command",
+    description: "Execute a shell command and return the output. Use for running tests, builds, git commands, etc.",
+    input_schema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The command to execute" },
+        cwd: { type: "string", description: "Working directory for the command" }
+      },
+      required: ["command"]
+    }
+  }
+];
+```
+
+**The description matters enormously.** Claude decides whether and how to use
+a tool based on its description. A vague description leads to misuse. A
+Windows-aware description can guide Claude toward Windows-appropriate behavior.
+
+---
+
+## The tool call / tool result cycle
+
+When Claude decides to use a tool, the response looks like this:
+
+```json
+{
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "I'll read the file to understand the current structure."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01XYZ",
+      "name": "read_file",
+      "input": {
+        "path": "src/index.ts"
+      }
+    }
+  ]
+}
+```
+
+Claude Code receives this, executes the tool, and sends the result back:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "toolu_01XYZ",
+      "content": "import { Command } from 'commander';\n\nconst program = new Command();\n..."
+    }
+  ]
+}
+```
+
+Claude then sees the file contents and continues. This cycle can repeat many
+times in a single session -- read a file, reason about it, edit it, run a test,
+see the output, fix a failing test, and so on.
+
+---
+
+## Parallel tool calls
+
+Claude can request multiple tool calls in a single response:
+
+```json
+{
+  "role": "assistant",
+  "content": [
+    { "type": "tool_use", "id": "toolu_001", "name": "read_file",    "input": { "path": "src/index.ts" } },
+    { "type": "tool_use", "id": "toolu_002", "name": "read_file",    "input": { "path": "src/utils.ts" } },
+    { "type": "tool_use", "id": "toolu_003", "name": "list_directory","input": { "path": "src/" } }
+  ]
+}
+```
+
+Claude Code can execute these in parallel, then send all results back together.
+This is more efficient than sequential tool calls for tasks like "understand
+this codebase" where multiple reads are needed upfront.
+
+**Windows implication:** parallel file reads on Windows can hit file locking
+issues that don't occur on Unix. If multiple tool calls try to access the same
+file simultaneously, Windows may throw a sharing violation. The tool
+implementation needs to handle this gracefully.
+
+---
+
+## Safety patterns at the tool layer
+
+Safety is not just about Claude's behavior -- it is enforced at the tool layer.
+Claude Code does not blindly execute every tool call the model requests.
+
+### Confirmation before destructive operations
+
+```typescript
+async function deleteFile(path: string): Promise<ToolResult> {
+  // Never execute immediately -- always confirm
+  const confirmed = await promptUser(
+    `Claude wants to delete: ${path}\nProceed? [y/N]`
+  );
+
+  if (!confirmed) {
+    return {
+      success: false,
+      message: "User declined. File was not deleted."
+    };
+  }
+
+  await fs.unlink(path);
+  return { success: true, message: `Deleted: ${path}` };
+}
+```
+
+### Showing commands before running them
+
+```typescript
+async function runCommand(command: string): Promise<ToolResult> {
+  // Display what will be run
+  console.log(`\nRunning: ${command}`);
+
+  // Allow user to see and interrupt if needed
+  const result = await exec(command);
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code };
+}
+```
+
+### Sandboxing and path validation
+
+```typescript
+function validatePath(requestedPath: string, workingDir: string): string {
+  const resolved = path.resolve(workingDir, requestedPath);
+
+  // Prevent path traversal outside the working directory
+  if (!resolved.startsWith(workingDir)) {
+    throw new Error(
+      `Path traversal denied: ${requestedPath} resolves outside working directory`
+    );
+  }
+
+  return resolved;
+}
+```
+
+**This path validation is where Windows path handling complexity surfaces.**
+A path like `..\..\etc\passwd` on Windows, or `/mnt/c/sensitive` from a WSL
+context, needs to be caught by validation logic that understands all Windows
+path formats.
+
+---
+
+## Windows-specific tool implementation concerns
+
+### File reads
+
+```typescript
+async function readFile(inputPath: string): Promise<ToolResult> {
+  // WINDOWS: normalize path before using it
+  const normalizedPath = normalizePath(inputPath);
+
+  try {
+    const content = await fs.readFile(normalizedPath, "utf8");
+
+    // WINDOWS: normalize line endings in output
+    // \r\n in file content will inflate token usage and confuse diffs
+    const normalized = content.replace(/\r\n/g, "\n");
+
+    return { content: normalized };
+  } catch (err) {
+    // WINDOWS: provide Windows-specific guidance in error messages
+    if (err.code === "ENOENT") {
+      return {
+        error: `File not found: ${normalizedPath}\n` +
+               `Tip: Check that the path uses the correct separator for your shell.`
+      };
+    }
+    if (err.code === "EACCES") {
+      return {
+        error: `Permission denied: ${normalizedPath}\n` +
+               `Tip: On Windows, this may be caused by another process holding the file open, ` +
+               `or insufficient permissions. Try closing other applications that may have this file open.`
+      };
+    }
+    throw err;
+  }
+}
+```
+
+### Command execution
+
+```typescript
+async function runCommand(
+  command: string,
+  cwd?: string
+): Promise<ToolResult> {
+  // WINDOWS: detect shell context and adjust accordingly
+  const isWindows = process.platform === "win32";
+
+  const options = {
+    cwd: cwd ?? process.cwd(),
+    // WINDOWS: don't use /bin/sh on Windows
+    shell: isWindows ? process.env.COMSPEC ?? "cmd.exe" : "/bin/sh",
+    // WINDOWS: set encoding explicitly -- Windows may use cp1252 by default
+    encoding: "utf8" as const,
+    // WINDOWS: set environment to ensure consistent behavior
+    env: {
+      ...process.env,
+      FORCE_COLOR: "0",  // Disable color codes in output -- easier to parse
+    }
+  };
+
+  try {
+    const { stdout, stderr } = await execAsync(command, options);
+    return { stdout, stderr, exitCode: 0 };
+  } catch (err) {
+    return {
+      stdout: err.stdout ?? "",
+      stderr: err.stderr ?? "",
+      exitCode: err.code ?? 1
+    };
+  }
+}
+```
+
+---
+
+## Quick Lab
+
+### Step 1 -- Observe tool calls in a Claude Code session
+
+```powershell
+# Ask Claude Code to do something that requires multiple tool calls
+claude "read package.json and list all the dependencies"
+
+# Watch for the tool call indicators in the output
+# Notice how Claude reads the file before answering
+```
+
+### Step 2 -- Trigger a Windows-specific tool behavior
+
+```powershell
+# Ask Claude Code to run a command and observe what shell it uses
+claude "run the tests and show me the output"
+
+# Does it use PowerShell syntax? CMD syntax?
+# Does it handle the output correctly?
+```
+
+### Step 3 -- Think about path validation
+
+```powershell
+# What would happen if you asked Claude Code to read a file outside the project?
+# How does it respond?
+claude "read C:\Windows\System32\drivers\etc\hosts"
+```
+
+---
+
+## What to Notice
+
+- Tool descriptions guide Claude's behavior -- a Windows-aware description helps Claude generate correct commands
+- The tool result cycle can repeat many times -- each iteration adds to the context
+- Safety is enforced at the tool layer, not just hoped for in the model's behavior
+- File reads on Windows should normalize `\r\n` → `\n` to avoid token waste and diff noise
+- Error messages from tools should include Windows-specific diagnostic guidance
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- How tool use works mechanically -- the request/result cycle
+- Why the tool implementations are where Windows-specific engineering lives
+- What safety patterns are enforced at the tool layer
+- How Windows path handling and line endings affect tool behavior
+
+Strong answer:
+
+*"Tool use is the bridge between Claude's reasoning and the real world. Claude
+requests a tool call -- read this file, run this command -- and Claude Code
+executes it and sends the result back. From a Windows engineering perspective,
+every one of those tool implementations has Windows-specific concerns: path
+normalization, line ending handling, shell selection, permission model
+differences, and error messages that are meaningful in a Windows context.
+Safety is also enforced at this layer -- path validation, confirmation before
+destructive operations, sandboxing to the working directory. These are
+engineering constraints, not model behavior."*
+
+---
+
+<QuizSet
+  title="Tool Invocation Patterns Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why should file read tool implementations normalize \\r\\n to \\n on Windows?",
+      options: [
+        "Because Windows doesn't support \\r\\n",
+        "To reduce token usage and prevent diff noise when file contents are included in context",
+        "Because the API rejects \\r\\n characters",
+        "To make files smaller on disk"
+      ],
+      answer: "To reduce token usage and prevent diff noise when file contents are included in context",
+      explanation: "Windows files often use \\r\\n line endings. When file contents are sent to the model as tool results, \\r\\n doubles the line-ending tokens and causes diff outputs to show every line as changed. Normalizing to \\n keeps context efficient and diffs clean."
+    },
+    {
+      question: "Where should safety constraints like 'confirm before deleting files' be enforced?",
+      options: [
+        "Only in the model's system prompt",
+        "At the tool layer in Claude Code -- not just in the model's instructions",
+        "By the operating system",
+        "In the user's shell profile"
+      ],
+      answer: "At the tool layer in Claude Code -- not just in the model's instructions",
+      explanation: "Relying only on the model to behave safely is insufficient. Safety constraints must be enforced in the tool implementations -- confirmation prompts, path validation, sandboxing -- so they hold regardless of what the model requests."
+    },
+    {
+      question: "What Windows-specific issue can arise when Claude Code executes multiple tool calls in parallel?",
+      options: [
+        "Windows runs out of memory",
+        "File locking -- Windows may throw a sharing violation if multiple operations access the same file simultaneously",
+        "PowerShell blocks parallel execution",
+        "The API rate limit is exceeded"
+      ],
+      answer: "File locking -- Windows may throw a sharing violation if multiple operations access the same file simultaneously",
+      explanation: "Windows file locking is stricter than Unix. When Claude Code runs parallel tool calls that access the same file, Windows may throw a sharing violation error that wouldn't occur on macOS or Linux. Tool implementations need to handle this gracefully."
+    }
+  ]}
+/>
