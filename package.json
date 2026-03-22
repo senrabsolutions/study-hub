@@ -7,10 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest",
     "scaffold:roadmap": "node scripts/scaffold-roadmap.js",
     "new:lesson": "node scripts/new-lesson.js",
-    "new:track": "node scripts/new-track.js",
-    "test": "vitest"
+    "new:track": "node scripts/new-track.js"
   },
   "dependencies": {
     "@mdx-js/loader": "^3.1.1",
