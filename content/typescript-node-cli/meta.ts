@@ -32,4 +32,22 @@ export const lessons = [
     duration: "20 min",
     difficulty: "Intermediate",
   },
+  {
+    slug: "commander-internals",
+    title: "Commander Internals: How Argument Parsing Actually Works",
+    order: 4,
+    summary:
+      "The three-stage pipeline from user input to handler, how Windows shells transform arguments before Node sees them, and how to diagnose parsing bugs.",
+    duration: "20 min",
+    difficulty: "Intermediate",
+  },
+  {
+    slug: "bun-vs-node",
+    title: "Bun vs Node.js for CLI Tools",
+    order: 5,
+    summary:
+      "Startup time, native TypeScript support, subprocess behavior differences, and why Bun's Windows maturity matters for a tool like Claude Code.",
+    duration: "15 min",
+    difficulty: "Intermediate",
+  },
 ] as const;
