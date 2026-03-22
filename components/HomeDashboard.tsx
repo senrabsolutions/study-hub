@@ -108,7 +108,7 @@ export default function HomeDashboard({ tracks }: HomeDashboardProps) {
         </p>
         <p className="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
           Covers PATH resolution, subprocess execution, PowerShell behavior,
-          cross-platform issues, and developer experience — with hands-on labs
+          cross-platform issues, and developer experience -- with hands-on labs
           and interview-focused explanations.
         </p>
 
