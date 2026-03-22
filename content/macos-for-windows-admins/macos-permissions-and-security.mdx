@@ -1,0 +1,290 @@
+# macOS Permissions and Security for Windows Admins
+
+## Why this matters
+
+macOS permissions work differently from Windows ACLs, and macOS has additional security layers that Windows does not -- Gatekeeper, SIP, TCC, and code signing. Understanding these is essential when a tool fails to run, a script is blocked, or a CLI tool cannot access a directory it should be able to reach.
+
+---
+
+## Key Concepts
+
+- macOS uses Unix-style permissions (owner/group/other) rather than Windows ACLs
+- `sudo` is the macOS equivalent of "Run as Administrator"
+- System Integrity Protection (SIP) prevents modification of certain system directories even as root
+- Gatekeeper controls which apps can run based on code signing
+- TCC (Transparency Consent and Control) manages app access to sensitive resources
+
+---
+
+## Unix permissions vs Windows ACLs
+
+| Windows | macOS |
+|---|---|
+| NTFS ACLs | Unix permissions (rwx) |
+| icacls / Get-Acl | chmod / chown |
+| "Run as Administrator" | sudo |
+| UAC prompt | sudo password prompt |
+| SYSTEM account | root |
+| Administrators group | wheel / admin group |
+
+```bash
+# View permissions (like icacls on Windows)
+ls -la
+
+# Output looks like:
+# -rw-r--r--  1 logan  staff  1234 Mar 22 10:00 file.txt
+# drwxr-xr-x  5 logan  staff   160 Mar 22 10:00 directory/
+
+# Permission breakdown: -rw-r--r--
+# - = file (d = directory)
+# rw- = owner can read and write
+# r-- = group can read only
+# r-- = everyone else can read only
+```
+
+### chmod -- changing permissions
+
+```bash
+# Make a script executable (very common need)
+chmod +x script.sh
+
+# Octal notation (like setting specific ACL bits)
+chmod 755 script.sh    # rwxr-xr-x  (owner: rwx, group: rx, other: rx)
+chmod 644 file.txt     # rw-r--r--  (owner: rw, group: r, other: r)
+chmod 600 secret.key   # rw-------  (owner: rw only, no one else)
+
+# Recursive (like icacls /T on Windows)
+chmod -R 755 directory/
+```
+
+### chown -- changing ownership
+
+```bash
+# Change owner
+chown logan file.txt
+
+# Change owner and group
+chown logan:staff file.txt
+
+# Recursive
+chown -R logan:staff directory/
+```
+
+---
+
+## sudo -- running as administrator
+
+`sudo` is the macOS equivalent of "Run as Administrator". Unlike Windows UAC which shows a GUI prompt, sudo requires you to type your password in the terminal.
+
+```bash
+# Run a command as root
+sudo command
+
+# Edit a system file
+sudo nano /etc/hosts
+
+# Run a shell as root (use carefully)
+sudo -s
+
+# Run as a specific user
+sudo -u otheruser command
+
+# List what sudo permissions you have
+sudo -l
+```
+
+**Key difference from Windows:** On macOS, `sudo` access is granted per-user in `/etc/sudoers`. The admin group has sudo access by default. You can verify your sudo access with `sudo -l`.
+
+---
+
+## System Integrity Protection (SIP)
+
+SIP is a macOS security feature that prevents modification of certain system directories -- even as root. There is no direct Windows equivalent, though it is conceptually similar to Windows File Protection.
+
+Protected locations include:
+- `/System`
+- `/usr` (except `/usr/local`)
+- `/bin`
+- `/sbin`
+
+```bash
+# Check SIP status
+csrutil status
+
+# Output: System Integrity Protection status: enabled.
+```
+
+**Why this matters for CLI tools:** Some older tools or installation instructions tell you to copy files to `/usr/bin`. This will fail on modern macOS with SIP enabled, even with sudo. The correct location for user-installed tools is `/usr/local/bin` (for Intel) or `/opt/homebrew/bin` (for Apple Silicon).
+
+---
+
+## Gatekeeper and code signing
+
+Gatekeeper prevents unsigned or unverified apps from running. When a user downloads a CLI tool and tries to run it, they may see:
+
+```
+"tool" cannot be opened because the developer cannot be verified
+```
+
+This is similar to Windows SmartScreen but stricter. For CLI tools distributed to users:
+
+```bash
+# Check if a binary is signed
+codesign -dv --verbose=4 /path/to/tool
+
+# Check Gatekeeper assessment
+spctl --assess --verbose /path/to/tool
+
+# Allow a specific app (users sometimes need this for downloaded tools)
+xattr -d com.apple.quarantine /path/to/tool
+```
+
+**Relevance to Claude Code:** When distributing Claude Code updates on macOS, code signing is required for Gatekeeper to allow the tool to run without user intervention. This is why macOS distribution requires an Apple Developer account and signing certificates.
+
+---
+
+## TCC -- app permissions on macOS
+
+TCC (Transparency Consent and Control) is macOS's system for managing app access to sensitive resources. Apps must request permission to access:
+
+- Full Disk Access
+- Documents, Downloads, Desktop folders
+- Camera, Microphone
+- Contacts, Calendar, Reminders
+- Screen Recording
+
+For CLI tools, the most relevant is **Full Disk Access**. A terminal app that does not have Full Disk Access cannot read certain protected directories.
+
+```bash
+# Check if Terminal has full disk access
+# System Settings -> Privacy & Security -> Full Disk Access
+# Look for Terminal or iTerm2 in the list
+
+# Test if you can access a protected directory
+ls ~/Library/Messages/   # may be blocked without full disk access
+```
+
+**Why this matters for Claude Code:** Claude Code needs to read and write files in the user's working directory. If the terminal Claude Code is running in does not have the right TCC permissions, file operations will fail silently or with permission errors.
+
+---
+
+## The macOS keychain
+
+macOS stores credentials in the Keychain rather than Windows Credential Manager.
+
+```bash
+# Store a credential
+security add-generic-password -s "service-name" -a "account" -w "password"
+
+# Retrieve a credential
+security find-generic-password -s "service-name" -a "account" -w
+
+# List keychains
+security list-keychains
+```
+
+For CLI tools that need to store API keys or tokens, the Keychain is the correct place -- not environment variables in `.zshrc`.
+
+---
+
+## Quick Lab
+
+### Step 1 -- Check your permissions
+
+```bash
+# Who are you?
+whoami
+id
+
+# Are you an admin?
+groups | grep -i admin && echo "admin" || echo "not admin"
+
+# Check SIP
+csrutil status
+```
+
+### Step 2 -- Inspect file permissions
+
+```bash
+# Check permissions on a file
+ls -la ~/.zshrc
+
+# Check permissions on Homebrew
+ls -la /opt/homebrew/bin/brew 2>/dev/null || ls -la /usr/local/bin/brew
+```
+
+### Step 3 -- Test sudo
+
+```bash
+# Verify sudo works
+sudo echo "sudo works"
+
+# See your sudo privileges
+sudo -l
+```
+
+---
+
+## What to Notice
+
+- SIP means some system directories cannot be modified even as root -- this is by design, not a bug
+- The quarantine attribute (`com.apple.quarantine`) is added to all files downloaded from the internet -- this is what Gatekeeper checks
+- TCC permissions are per-app, not per-user -- if you switch from Terminal to iTerm2, you need to grant permissions again
+- The Keychain is the right place to store secrets on macOS, not environment variables
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- The difference between Unix permissions and Windows ACLs
+- What SIP is and why it matters for CLI tool installation
+- Why a downloaded tool might fail to run on macOS even if permissions look correct
+- What TCC is and how it affects CLI tools that read files
+
+Strong answer:
+
+"macOS has several security layers on top of Unix permissions. SIP prevents modification of system directories even as root, which is why installation instructions that say to copy files to /usr/bin will fail on modern macOS. Gatekeeper checks code signing for downloaded executables -- unsigned tools get quarantined. And TCC controls which apps can access sensitive directories, so if a terminal does not have Full Disk Access, file operations from Claude Code can fail silently. Understanding all three layers is important for debugging macOS-specific failures."
+
+---
+
+<QuizSet
+  title="macOS Permissions and Security Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why would sudo cp tool /usr/bin/tool fail on modern macOS even with the correct password?",
+      options: [
+        "The password was wrong",
+        "System Integrity Protection prevents modification of /usr/bin even as root",
+        "sudo does not work on macOS",
+        "/usr/bin does not exist on macOS"
+      ],
+      answer: "System Integrity Protection prevents modification of /usr/bin even as root",
+      explanation: "SIP protects /usr/bin (and other system directories) from modification even by root. The correct location for user-installed tools is /usr/local/bin (Intel) or /opt/homebrew/bin (Apple Silicon)."
+    },
+    {
+      question: "A user downloads a CLI tool and gets: tool cannot be opened because the developer cannot be verified. What is causing this?",
+      options: [
+        "The tool has a virus",
+        "The user does not have admin rights",
+        "Gatekeeper is blocking the tool because it lacks a valid code signature",
+        "The tool is incompatible with the macOS version"
+      ],
+      answer: "Gatekeeper is blocking the tool because it lacks a valid code signature",
+      explanation: "Gatekeeper checks that downloaded apps are signed by a recognized developer. Unsigned tools trigger this warning. The quarantine attribute can be removed with xattr -d com.apple.quarantine, or the tool can be properly code-signed for distribution."
+    },
+    {
+      question: "A CLI tool that reads files works in one terminal but fails in another. What is the most likely macOS cause?",
+      options: [
+        "The PATH is different between terminals",
+        "The TCC permissions differ -- one terminal has Full Disk Access and the other does not",
+        "The file system is corrupted",
+        "The shell version is different"
+      ],
+      answer: "The TCC permissions differ -- one terminal has Full Disk Access and the other does not",
+      explanation: "TCC permissions are granted per app. If you switch from Terminal.app to iTerm2, or install a new terminal, the new app starts without any TCC permissions. Full Disk Access must be granted separately in System Settings -> Privacy & Security."
+    }
+  ]}
+/>

@@ -11,6 +11,7 @@ export const trackOrder = [
   "ai-tooling-cli-workflows",
   "certificates-and-tls",
   "anthropic",
+  "macos-for-windows-admins",
 ] as const;
 
 export type TrackKey = (typeof trackOrder)[number];

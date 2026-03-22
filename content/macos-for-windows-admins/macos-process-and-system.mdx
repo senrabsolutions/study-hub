@@ -1,0 +1,312 @@
+# macOS Process and System Management for Windows Admins
+
+## Why this matters
+
+When something goes wrong in a development environment -- a process hanging, a port in use, a tool consuming too much memory -- you need to be able to diagnose and fix it quickly. The tools you reach for on macOS are different from Windows, but the concepts are identical.
+
+---
+
+## Key Concepts
+
+- Activity Monitor is the macOS equivalent of Task Manager
+- `ps`, `top`, and `htop` are the CLI equivalents
+- `launchctl` manages services (the macOS equivalent of Windows Services)
+- `lsof` shows open files and network connections (essential for debugging port conflicts)
+- macOS uses plist files for service configuration instead of the Windows registry
+
+---
+
+## Process management
+
+| Windows | macOS |
+|---|---|
+| Task Manager | Activity Monitor |
+| `tasklist` | `ps aux` |
+| `taskkill /PID 1234` | `kill 1234` |
+| `taskkill /F /PID 1234` | `kill -9 1234` |
+| `Get-Process` | `ps aux` |
+| `Stop-Process` | `kill` |
+| Resource Monitor | Activity Monitor (Memory tab) |
+
+```bash
+# List all processes
+ps aux
+
+# Find a specific process
+ps aux | grep node
+
+# Kill a process by PID
+kill 1234
+
+# Force kill (like taskkill /F)
+kill -9 1234
+
+# Kill by name
+pkill node
+killall node
+
+# Interactive process viewer (like Task Manager in terminal)
+top
+
+# Better interactive viewer (install via Homebrew)
+brew install htop
+htop
+```
+
+---
+
+## Finding what is using a port
+
+This comes up constantly in development. On Windows you use `netstat`. On macOS:
+
+```bash
+# Find what is using port 3000
+lsof -i :3000
+
+# See all listening ports
+lsof -i -P -n | grep LISTEN
+
+# Alternative
+netstat -an | grep 3000
+```
+
+`lsof` output looks like:
+
+```
+COMMAND   PID   USER   FD   TYPE  SIZE/OFF NODE NAME
+node     1234  logan   23u  IPv6         0t0  TCP *:3000 (LISTEN)
+```
+
+This tells you the command name, PID, and user -- everything you need to kill the right process.
+
+---
+
+## Services -- launchctl vs Windows Services
+
+Windows uses the Services MMC snap-in and `sc.exe`. macOS uses `launchctl` with plist configuration files.
+
+| Windows | macOS |
+|---|---|
+| `sc start ServiceName` | `launchctl start com.example.service` |
+| `sc stop ServiceName` | `launchctl stop com.example.service` |
+| `Get-Service` | `launchctl list` |
+| Services (services.msc) | Activity Monitor (no GUI service manager) |
+
+```bash
+# List all loaded services
+launchctl list
+
+# List services matching a name
+launchctl list | grep ssh
+
+# Start a service
+launchctl start com.openssh.sshd
+
+# Stop a service
+launchctl stop com.openssh.sshd
+```
+
+Services on macOS are configured as plist files stored in:
+
+```
+/Library/LaunchDaemons/     # system-wide services (like Windows system services)
+/Library/LaunchAgents/      # per-user services, all users
+~/Library/LaunchAgents/     # per-user services, current user only
+```
+
+Homebrew-installed services can be managed more simply:
+
+```bash
+# Start a Homebrew service
+brew services start postgresql
+
+# Stop a Homebrew service
+brew services stop postgresql
+
+# List all Homebrew services and their status
+brew services list
+```
+
+This is much closer to the Windows Services experience -- exactly what you are used to.
+
+---
+
+## Disk and filesystem
+
+| Windows | macOS |
+|---|---|
+| `dir` | `ls -la` |
+| `cd` | `cd` |
+| `copy` | `cp` |
+| `move` | `mv` |
+| `del` | `rm` |
+| `mkdir` | `mkdir` |
+| `Get-ChildItem -Recurse` | `find . -type f` |
+| Explorer | Finder |
+| `diskpart` | `diskutil` |
+
+```bash
+# Disk usage (like Windows disk properties)
+df -h
+
+# Directory size
+du -sh ~/Documents
+
+# Find large files
+find ~ -size +100M -type f 2>/dev/null
+
+# Disk utility CLI
+diskutil list          # list all disks
+diskutil info /dev/disk0
+```
+
+---
+
+## macOS filesystem quirks for Windows admins
+
+**No drive letters.** Everything is under `/`. External drives mount at `/Volumes/DriveName`.
+
+**Case-insensitive by default.** Like Windows, `file.txt` and `FILE.TXT` refer to the same file. This is a source of bugs when writing code that runs on Linux (case-sensitive) -- code that works on both your Mac and a colleague's Mac can fail in CI which runs Linux.
+
+**Hidden files.** Files starting with `.` are hidden. Show them:
+
+```bash
+ls -la          # in terminal
+# In Finder: Cmd + Shift + .
+```
+
+**No direct equivalent of `C:\Users\logan`.** Your home directory is `/Users/logan` (note: capital U, lowercase username).
+
+**Symlinks everywhere.** macOS uses symlinks heavily for compatibility. `/usr/local` may be a symlink. `brew --prefix` shows where things actually are.
+
+---
+
+## System information
+
+| Windows | macOS |
+|---|---|
+| `systeminfo` | `system_profiler SPSoftwareDataType` |
+| `winver` | `sw_vers` |
+| `hostname` | `hostname` |
+| `ipconfig` | `ifconfig` or `ip addr` |
+| `ipconfig /flushdns` | `sudo dscacheutil -flushcache` |
+
+```bash
+# macOS version
+sw_vers
+
+# Hardware info
+system_profiler SPHardwareDataType
+
+# Network interfaces
+ifconfig
+
+# IP address (simpler)
+ipconfig getifaddr en0
+
+# Flush DNS cache
+sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder
+```
+
+---
+
+## Quick Lab
+
+### Step 1 -- Find a running process
+
+```bash
+# Find any node processes
+ps aux | grep node
+
+# Find what is on port 3000 (if anything)
+lsof -i :3000
+```
+
+### Step 2 -- Check disk usage
+
+```bash
+# Overall disk
+df -h
+
+# Your home directory size
+du -sh ~
+```
+
+### Step 3 -- Check Homebrew services
+
+```bash
+brew services list
+```
+
+### Step 4 -- System info
+
+```bash
+sw_vers
+hostname
+```
+
+---
+
+## What to Notice
+
+- `kill -9` is the nuclear option -- always try `kill` (SIGTERM) first and give the process a moment to clean up
+- `lsof -i :PORT` is the fastest way to debug port conflicts on macOS -- faster than on Windows
+- `brew services` is much friendlier than raw `launchctl` for managing dev services
+- The case-insensitive filesystem will hide bugs that only show up in Linux CI -- be aware of this when writing path-sensitive code
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- How to find and kill a process on macOS
+- How to find what is using a specific port
+- The difference between LaunchDaemons and LaunchAgents
+- How Homebrew services compares to Windows Services management
+
+Strong answer:
+
+"On macOS I reach for lsof -i :PORT immediately when there is a port conflict -- it tells me the command, PID, and user in one line. For process management, ps aux and kill work the same way conceptually as tasklist and taskkill on Windows. For services, brew services is the friendliest interface -- it wraps launchctl so I don't have to interact with plist files directly for most dev tools."
+
+---
+
+<QuizSet
+  title="macOS Process and System Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the macOS equivalent of taskkill /F /PID 1234?",
+      options: [
+        "stop 1234",
+        "kill -9 1234",
+        "pkill -f 1234",
+        "terminate 1234"
+      ],
+      answer: "kill -9 1234",
+      explanation: "kill -9 sends SIGKILL which forces the process to terminate immediately, equivalent to taskkill /F on Windows. Regular kill sends SIGTERM which asks the process to exit gracefully first."
+    },
+    {
+      question: "What command shows what process is using port 3000 on macOS?",
+      options: [
+        "netstat -p 3000",
+        "ps aux | grep 3000",
+        "lsof -i :3000",
+        "port-check 3000"
+      ],
+      answer: "lsof -i :3000",
+      explanation: "lsof (list open files) with the -i flag shows network connections. lsof -i :3000 shows the command, PID, and user for whatever is listening on port 3000 -- the fastest way to debug port conflicts on macOS."
+    },
+    {
+      question: "What is the simplest way to manage Homebrew-installed services on macOS?",
+      options: [
+        "Edit plist files in /Library/LaunchDaemons directly",
+        "Use Activity Monitor",
+        "brew services start/stop/list",
+        "launchctl load/unload"
+      ],
+      answer: "brew services start/stop/list",
+      explanation: "brew services wraps launchctl with a simple interface for starting, stopping, and listing services installed by Homebrew. This is far simpler than managing plist files directly and is the standard way to manage dev services like PostgreSQL or Redis on macOS."
+    }
+  ]}
+/>

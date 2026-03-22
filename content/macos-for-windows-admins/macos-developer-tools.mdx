@@ -1,0 +1,304 @@
+# macOS Developer Tools and Workflow
+
+## Why this matters
+
+Anthropic engineers use a specific set of tools every day. Knowing what they are, how they work, and how they compare to what you already know from Windows will help you be productive from day one rather than spending your first weeks figuring out the tooling.
+
+---
+
+## Key Concepts
+
+- Xcode Command Line Tools is the macOS equivalent of Visual C++ Build Tools -- required for compiling native code
+- Git on macOS works identically to Windows Git but is installed differently
+- VS Code is cross-platform and works the same on both
+- The macOS equivalent of Task Scheduler is cron or launchd
+- SSH configuration is the same format on both platforms
+
+---
+
+## Xcode Command Line Tools
+
+Before you can compile most native software on macOS, you need the Xcode Command Line Tools. This is the macOS equivalent of installing Visual C++ Build Tools or Windows SDK on Windows -- many packages require it even if you never write a line of C.
+
+```bash
+# Install (prompts a GUI dialog)
+xcode-select --install
+
+# Verify installation
+xcode-select -p
+# Should output: /Library/Developer/CommandLineTools
+
+# Check what version of developer tools
+pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+```
+
+Homebrew will prompt you to install this automatically if it is missing.
+
+---
+
+## Git on macOS
+
+Git works identically on macOS and Windows at the command level. The differences are in how it is installed and configured.
+
+```bash
+# Install via Homebrew (recommended -- keeps Git up to date)
+brew install git
+
+# Or use the system Git (older, comes with Xcode CLT)
+/usr/bin/git --version
+
+# Configure (same as Windows)
+git config --global user.name "Logan Barnes"
+git config --global user.email "logan.barnes92@gmail.com"
+
+# Check config
+git config --list
+
+# SSH key generation (same as Windows)
+ssh-keygen -t ed25519 -C "logan.barnes92@gmail.com"
+
+# Add to SSH agent (macOS-specific)
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+**macOS SSH agent integration:** macOS integrates SSH keys with the Keychain. The `--apple-use-keychain` flag stores the passphrase in Keychain so you do not have to enter it every time -- similar to how Windows stores credentials.
+
+### .gitconfig location
+
+On both platforms: `~/.gitconfig`
+
+### SSH config location
+
+On both platforms: `~/.ssh/config`
+
+---
+
+## Node.js and npm on macOS
+
+Node.js installs and works identically to Windows at the usage level. The installation method differs.
+
+```bash
+# Install via Homebrew
+brew install node
+
+# Or use nvm (Node Version Manager) -- recommended for development
+brew install nvm
+
+# Then in ~/.zshrc:
+export NVM_DIR="$HOME/.nvm"
+[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+
+# Install a specific Node version
+nvm install 20
+nvm use 20
+
+# Check versions
+node --version
+npm --version
+```
+
+**No .cmd wrappers.** On macOS, npm global bin entries are symlinks, not .cmd and .ps1 wrappers. The shebang line (`#!/usr/bin/env node`) works directly in zsh and bash. This is why CLI tools designed for Unix work out of the box on macOS but need wrapper scripts on Windows.
+
+---
+
+## VS Code on macOS
+
+VS Code works almost identically on macOS and Windows. Key differences:
+
+| Windows | macOS |
+|---|---|
+| `Ctrl+P` | `Cmd+P` |
+| `Ctrl+Shift+P` | `Cmd+Shift+P` |
+| `Ctrl+,` | `Cmd+,` |
+| File -> Preferences -> Settings | Code -> Preferences -> Settings |
+| Settings in AppData | Settings in ~/Library/Application Support/Code |
+
+**The `code` CLI command:** On Windows, VS Code adds `code` to PATH automatically. On macOS, you need to install it manually:
+
+```
+Cmd+Shift+P -> "Shell Command: Install 'code' command in PATH"
+```
+
+After that, `code .` works exactly like on Windows.
+
+**Settings sync:** If you use VS Code Settings Sync, your settings, keybindings, and extensions transfer automatically between your Windows and Mac machines.
+
+---
+
+## Task scheduling -- cron vs Task Scheduler
+
+macOS uses cron (standard Unix) and launchd (Apple's system) for scheduled tasks.
+
+```bash
+# Edit your crontab (like Task Scheduler)
+crontab -e
+
+# Cron syntax: minute hour day month weekday command
+# Run a script every day at 9am:
+0 9 * * * /Users/logan/scripts/daily.sh
+
+# List your cron jobs
+crontab -l
+
+# Remove all cron jobs
+crontab -r
+```
+
+For more complex scheduling (run at startup, retry on failure, etc.), use a launchd plist in `~/Library/LaunchAgents/`. But for simple periodic tasks, cron is fine.
+
+---
+
+## macOS terminal tools every engineer uses
+
+```bash
+# cat -- print file contents (same as type in CMD)
+cat file.txt
+
+# grep -- search text (like Select-String in PowerShell)
+grep "pattern" file.txt
+grep -r "pattern" directory/    # recursive
+
+# find -- find files (like Get-ChildItem -Recurse in PowerShell)
+find . -name "*.ts" -type f
+find . -name "*.ts" -newer package.json
+
+# curl -- HTTP requests (available on Windows too but more native on Mac)
+curl https://api.anthropic.com
+curl -X POST -H "Content-Type: application/json" -d '{}' https://api.example.com
+
+# jq -- parse JSON (install via brew install jq)
+curl https://api.example.com | jq .
+
+# pbcopy / pbpaste -- clipboard (macOS-specific)
+cat file.txt | pbcopy          # copy file contents to clipboard
+pbpaste > output.txt           # paste clipboard to file
+echo "text" | pbcopy           # copy text to clipboard
+
+# open -- open files/URLs (macOS-specific)
+open .                         # open current directory in Finder
+open https://example.com       # open URL in default browser
+open file.pdf                  # open file with default app
+```
+
+---
+
+## Useful macOS keyboard shortcuts for terminal work
+
+| Action | Shortcut |
+|---|---|
+| Open Terminal | Cmd+Space, type "Terminal" |
+| New tab in Terminal | Cmd+T |
+| Clear terminal | Cmd+K |
+| Copy | Cmd+C |
+| Paste | Cmd+V |
+| Search terminal history | Ctrl+R (same as bash/zsh on Windows) |
+| Interrupt running command | Ctrl+C (same everywhere) |
+| End of line | Ctrl+E |
+| Start of line | Ctrl+A |
+
+---
+
+## Quick Lab
+
+### Step 1 -- Verify dev tools
+
+```bash
+# Check Xcode CLT
+xcode-select -p
+
+# Check Git version and config
+git --version
+git config --list | grep user
+
+# Check Node
+node --version
+npm --version
+```
+
+### Step 2 -- Try macOS-specific tools
+
+```bash
+# Copy something to clipboard
+echo "hello from macOS" | pbcopy
+pbpaste    # should print: hello from macOS
+
+# Open current directory in Finder
+open .
+
+# Use jq if installed
+echo '{"name": "logan", "role": "engineer"}' | jq .name
+```
+
+### Step 3 -- Check VS Code CLI
+
+```bash
+# Should work after installing shell command
+code --version
+code .    # opens current directory
+```
+
+---
+
+## What to Notice
+
+- No .cmd wrappers on macOS -- shebangs work directly, which is why Unix-first CLI tools are simpler to ship
+- `pbcopy` and `pbpaste` are macOS-only but incredibly useful in terminal workflows
+- `open .` is faster than navigating to a directory in Finder
+- Ctrl+R for history search works in both zsh on Mac and PowerShell on Windows -- muscle memory transfers
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- Why Xcode Command Line Tools is needed even for non-iOS development
+- How SSH key management differs between macOS and Windows
+- Why npm global CLIs work without .ps1 wrappers on macOS
+- What tools you would use to get productive quickly on a new Mac
+
+Strong answer:
+
+"Coming from Windows, the first things I set up on a Mac are Homebrew, Xcode Command Line Tools, Git configured with SSH and Keychain integration, and nvm for Node. The concepts are identical to Windows -- PATH, environment variables, package managers, services -- the tools are just different. The main mental shift is that there are no drive letters, the shell is zsh instead of PowerShell, and the Keychain replaces Windows Credential Manager for storing secrets. VS Code works identically so my editor workflow transfers completely."
+
+---
+
+<QuizSet
+  title="macOS Developer Tools Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why do macOS global npm CLI tools not need .ps1 or .cmd wrapper files like Windows does?",
+      options: [
+        "npm works differently on macOS",
+        "macOS shells can execute the Unix shebang line directly, so no wrapper is needed",
+        "macOS uses a different version of Node",
+        "Homebrew creates the wrappers automatically"
+      ],
+      answer: "macOS shells can execute the Unix shebang line directly, so no wrapper is needed",
+      explanation: "On Windows, CMD and PowerShell cannot process the Unix shebang (#!/usr/bin/env node), so npm generates .cmd and .ps1 wrappers. On macOS, zsh and bash read the shebang directly and invoke Node automatically -- no wrapper needed."
+    },
+    {
+      question: "What is the macOS equivalent of storing credentials in Windows Credential Manager?",
+      options: [
+        "~/.credentials file",
+        "Environment variables in ~/.zshrc",
+        "The macOS Keychain",
+        "A .env file"
+      ],
+      answer: "The macOS Keychain",
+      explanation: "The macOS Keychain securely stores credentials, certificates, and secrets. SSH keys stored with --apple-use-keychain integrate directly with the SSH agent so passphrases do not need to be re-entered. This is the correct and secure place for secrets on macOS."
+    },
+    {
+      question: "What is the macOS equivalent of Visual C++ Build Tools that many packages require?",
+      options: [
+        "Homebrew",
+        "Xcode full IDE",
+        "Xcode Command Line Tools",
+        "macOS SDK"
+      ],
+      answer: "Xcode Command Line Tools",
+      explanation: "Xcode Command Line Tools provides compilers, build tools, and headers that many packages need to compile native code. It is much smaller than the full Xcode IDE and is installed with xcode-select --install. Homebrew will prompt for it automatically if missing."
+    }
+  ]}
+/>

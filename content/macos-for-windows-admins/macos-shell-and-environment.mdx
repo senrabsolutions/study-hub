@@ -1,0 +1,249 @@
+# macOS Shell and Environment for Windows Admins
+
+## Why this matters
+
+Anthropic's engineering team works primarily on macOS. When you join, your colleagues will be using zsh, Homebrew, and macOS-native tooling every day. Understanding the macOS equivalents of the Windows tools you already know deeply will help you collaborate, contribute, and ramp faster.
+
+This is not about abandoning your Windows expertise -- it is about extending it.
+
+---
+
+## Key Concepts
+
+- macOS uses zsh as the default shell (since Catalina 2019), replacing bash
+- The macOS filesystem is case-insensitive by default (like Windows) but case-preserving
+- There are no drive letters -- everything is under a single root `/`
+- Environment variables work the same way conceptually but are configured differently
+- Homebrew is the macOS equivalent of winget/Chocolatey
+
+---
+
+## The shell comparison
+
+| Windows | macOS |
+|---|---|
+| PowerShell | zsh |
+| CMD | bash (legacy) |
+| Windows Terminal | Terminal.app / iTerm2 |
+| `$env:PATH` | `$PATH` |
+| `$env:HOME` | `$HOME` |
+| `%USERPROFILE%` | `~` |
+| `where.exe` | `which` |
+| `Get-Command` | `command -v` |
+
+---
+
+## PATH on macOS
+
+macOS PATH works the same way conceptually -- a colon-separated list of directories searched in order. But where it is configured is different.
+
+```bash
+# See current PATH
+echo $PATH
+
+# Find where a command lives
+which node
+which git
+
+# See ALL matches (like where.exe on Windows)
+# There is no direct equivalent -- use this:
+type -a node
+```
+
+PATH is configured in shell profile files, loaded in this order:
+
+```
+/etc/zshenv          # system-wide, always loaded
+/etc/zprofile        # system-wide, login shells
+~/.zprofile          # user, login shells
+~/.zshrc             # user, interactive shells (most common place to set PATH)
+~/.zshenv            # user, always loaded
+```
+
+The most common place to add to PATH on macOS:
+
+```bash
+# In ~/.zshrc
+export PATH="/opt/homebrew/bin:$PATH"
+```
+
+**The Homebrew PATH gotcha:** On Apple Silicon Macs (M1/M2/M3), Homebrew installs to `/opt/homebrew/bin`. On Intel Macs, it installs to `/usr/local/bin`. If a colleague's command works and yours does not, check which Homebrew prefix you have:
+
+```bash
+brew --prefix
+```
+
+---
+
+## Environment variables
+
+```bash
+# Print a variable
+echo $PATH
+echo $HOME
+
+# Set a variable for current session
+export MY_VAR="value"
+
+# See all environment variables (like 'set' in CMD or Get-ChildItem Env: in PowerShell)
+env
+printenv
+
+# Check if a variable is set
+echo ${MY_VAR:-"not set"}
+```
+
+Unlike Windows, macOS does not have a GUI for environment variables. Everything is done in shell profile files. Changes do not take effect until you open a new terminal or run:
+
+```bash
+source ~/.zshrc
+```
+
+This is the macOS equivalent of refreshing your PATH after an install.
+
+---
+
+## Homebrew -- the macOS package manager
+
+Homebrew is what winget and Chocolatey are on Windows. It is the standard way to install developer tools on macOS.
+
+```bash
+# Install a package
+brew install node
+brew install git
+brew install wget
+
+# Update package list
+brew update
+
+# Upgrade all installed packages
+brew upgrade
+
+# See what is installed
+brew list
+
+# Search for a package
+brew search ripgrep
+
+# Get info about a package
+brew info node
+
+# Uninstall
+brew uninstall node
+```
+
+Homebrew installs to a prefix directory and symlinks binaries into PATH. This is similar to how Chocolatey manages its bin directory.
+
+**Casks** are Homebrew's way of installing GUI applications:
+
+```bash
+# Install a GUI app
+brew install --cask visual-studio-code
+brew install --cask iterm2
+```
+
+---
+
+## Quick Lab
+
+### Step 1 -- Explore your shell environment
+
+```bash
+# What shell are you running?
+echo $SHELL
+
+# What version of zsh?
+zsh --version
+
+# Where does PATH come from?
+echo $PATH | tr ':' '\n'   # split on colon to read it clearly
+```
+
+### Step 2 -- Find commands
+
+```bash
+# Find node
+which node
+
+# See all matches
+type -a python3
+
+# Check if something is installed
+command -v git && echo "installed" || echo "not found"
+```
+
+### Step 3 -- Inspect your shell profile
+
+```bash
+# See what is in your zshrc
+cat ~/.zshrc
+
+# See what PATH additions Homebrew made
+grep -i path ~/.zshrc ~/.zprofile 2>/dev/null
+```
+
+---
+
+## What to Notice
+
+- `source ~/.zshrc` is the macOS equivalent of restarting your terminal to pick up PATH changes
+- Homebrew on Apple Silicon installs to `/opt/homebrew` -- always check `brew --prefix` when debugging PATH
+- There is no registry on macOS -- configuration lives in dotfiles and plist files
+- `which` only shows the first match -- use `type -a` to see all matches like `where.exe` does on Windows
+
+---
+
+## Interview Angle
+
+Be ready to explain:
+
+- Where PATH is configured on macOS and how to update it
+- The difference between `~/.zshrc` and `~/.zprofile`
+- How Homebrew manages packages and where it installs them
+- How to debug a "command not found" on macOS
+
+Strong answer:
+
+"On macOS, PATH is configured in shell profile files -- usually ~/.zshrc for interactive shells. The most common issue is a newly installed tool not being on PATH because the shell session predates the install. You either source the profile or open a new terminal. With Homebrew, the prefix location matters -- Apple Silicon uses /opt/homebrew and Intel uses /usr/local, so if a colleague's setup works and yours does not, that is the first thing I check."
+
+---
+
+<QuizSet
+  title="macOS Shell and Environment Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the macOS equivalent of refreshing environment variables after an install on Windows?",
+      options: [
+        "Reboot the Mac",
+        "Run source ~/.zshrc or open a new terminal",
+        "Run brew update",
+        "Log out and back in"
+      ],
+      answer: "Run source ~/.zshrc or open a new terminal",
+      explanation: "On macOS, environment variable changes in profile files do not take effect in the current session. Running source ~/.zshrc reloads the profile, or you can open a new terminal which loads the profile fresh."
+    },
+    {
+      question: "On Apple Silicon Macs, where does Homebrew install packages by default?",
+      options: [
+        "/usr/local/bin",
+        "/usr/bin",
+        "/opt/homebrew/bin",
+        "/home/brew/bin"
+      ],
+      answer: "/opt/homebrew/bin",
+      explanation: "Apple Silicon Macs (M1/M2/M3) use /opt/homebrew as the Homebrew prefix. Intel Macs use /usr/local. This difference is a common source of PATH issues when switching between machines or following instructions written for Intel Macs."
+    },
+    {
+      question: "What is the macOS equivalent of where.exe for finding all copies of a command on PATH?",
+      options: [
+        "which",
+        "whereis",
+        "type -a",
+        "find"
+      ],
+      answer: "type -a",
+      explanation: "which only shows the first match. type -a shows all matches for a command across all PATH entries, which is the behavior of where.exe on Windows. This is useful for diagnosing version conflicts."
+    }
+  ]}
+/>
