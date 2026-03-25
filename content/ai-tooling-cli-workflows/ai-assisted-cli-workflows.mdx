@@ -2,67 +2,310 @@
 
 ## Why this matters
 
-AI can speed up troubleshooting, scripting, and command discovery, but it can also produce commands that are incomplete, unsafe, or incorrect for your environment. In real engineering work, the important skill is not just getting a command from AI -- it is validating what that command does, how it behaves in your shell, and whether it is appropriate for the system you are touching.
+Claude Code is an AI tool that operates inside developer CLI workflows. Understanding how AI-assisted workflows actually function -- not just "AI helps you code" but the specific mechanics of how Claude Code integrates with your shell, your tools, and your context -- is foundational to this role.
 
-This matters especially in CLI workflows because small mistakes can have large effects. A generated command might assume the wrong shell, wrong path syntax, wrong package manager, wrong permissions model, or wrong operating system behavior. Engineers who use AI well treat it like a fast assistant, not an infallible source of truth.
+This lesson covers what good AI-CLI integration looks like, what the failure modes are, and how to think about developer trust and safety in AI-powered workflows.
+
+---
 
 ## Key Concepts
 
-- AI-generated commands must be reviewed before execution
-- Shell context matters: CMD, PowerShell, Bash, and terminal hosts behave differently
-- File paths, quoting, environment variables, and permissions are common failure points
-- Good engineers validate outputs, test safely, and debug before trusting automation
+- AI-assisted workflows augment the developer -- they do not replace judgment
+- Shell context is critical: the AI must know which shell is active, what PATH contains, and what the current environment looks like
+- Tool invocations are the mechanism: the AI requests actions, the tool executes them and reports results
+- Validation before execution is non-negotiable for destructive operations
+- The feedback loop (execute -> observe -> adjust) is what makes agentic workflows powerful
 
-## Quick Summary
+---
 
-AI is useful for CLI work, but it should be treated as a helper, not an authority. Always verify generated commands, confirm shell compatibility, and understand what a command will do before running it.
+## How Claude Code integrates with the shell
+
+When Claude Code runs, it has a context about the developer's environment:
+
+```
+Shell type:          PowerShell 7 (pwsh)
+Working directory:   C:\Users\logan\project
+OS:                  Windows 11
+Node version:        20.11.0
+Git branch:          feature/windows-fix
+```
+
+This context shapes how Claude generates commands. A well-configured integration means Claude generates PowerShell syntax for PowerShell users, CMD syntax for CMD users, and bash for WSL users.
+
+**When context is wrong, commands fail:**
+
+```powershell
+# Claude thinks you are using bash (wrong context)
+# Generates: find . -name "*.ts" | xargs grep "import"
+# User is in CMD -- this command does not exist
+
+# Claude knows you are using PowerShell (correct context)
+# Generates: Get-ChildItem -Recurse -Filter "*.ts" | Select-String "import"
+# Works correctly
+```
+
+The Windows platform engineer's job includes ensuring Claude Code correctly detects and uses the shell context.
+
+---
+
+## The validation principle
+
+AI-generated commands must be treated as suggestions, not instructions. This is especially important for:
+
+**Destructive operations:**
+```powershell
+# A command Claude might generate to clean up node_modules:
+Remove-Item -Recurse -Force .\node_modules
+
+# Before running this, verify:
+# 1. Is this the right directory?
+# 2. Is this the right project?
+# 3. Will this break anything currently running?
+```
+
+**Commands that assume your environment:**
+```bash
+# AI generates this (assuming Unix):
+npm config set prefix ~/.npm-global
+
+# On Windows this should be:
+npm config set prefix "$env:APPDATA\npm"
+
+# The AI may have generated an incorrect path for your platform
+```
+
+**Commands with side effects beyond the immediate task:**
+```powershell
+# AI generates this to fix a PATH issue:
+[Environment]::SetEnvironmentVariable("PATH", "$env:PATH;C:\new\path", "Machine")
+# This permanently modifies the machine-level PATH for ALL users
+# Should it be User scope instead?
+```
+
+The principle: understand what a command will do before running it, not after.
+
+---
+
+## Verifying AI-generated commands before execution
+
+Practical verification steps:
+
+### For file operations:
+
+```powershell
+# Before running a destructive command, preview what it would affect
+Get-ChildItem -Recurse -Filter "*.tmp" | Select-Object FullName
+# Then decide if Remove-Item on these is what you want
+```
+
+### For shell commands:
+
+```powershell
+# Check if a command exists before running something that depends on it
+Get-Command git -ErrorAction SilentlyContinue
+Get-Command node -ErrorAction SilentlyContinue
+
+# Check what version would run
+(Get-Command node).Source
+node --version
+```
+
+### For environment changes:
+
+```powershell
+# Before modifying PATH, check current state
+$env:PATH -split ";"
+
+# Understand scope: User vs Machine
+[Environment]::GetEnvironmentVariable("PATH", "User")
+[Environment]::GetEnvironmentVariable("PATH", "Machine")
+```
+
+---
+
+## Shell context errors -- the most common failure mode
+
+The most frequent AI-CLI failure is context mismatch: the AI generates a command for the wrong shell.
+
+```
+AI thinks: bash
+User has:  PowerShell
+Generated: ls -la | grep "*.ts"
+Actual:    PowerShell does not have ls with Unix flags; grep is not available
+```
+
+**How to detect context errors:**
+
+The error message often reveals the mismatch:
+- `'grep' is not recognized` -- command is from Unix, you are in CMD/PowerShell
+- `The term 'Get-ChildItem' is not recognized` -- PowerShell command in CMD
+- `bash: syntax error near unexpected token` -- Windows syntax in bash
+
+**How to fix them:**
+
+```powershell
+# Tell Claude Code your context explicitly
+# In many tools, you can provide this in the prompt:
+"I am using PowerShell 7 on Windows 11. Please use PowerShell syntax."
+
+# Or verify the generated command before running:
+# - Does it use %VAR% (CMD) or $env:VAR (PowerShell)?
+# - Does it use backslashes or forward slashes in paths?
+# - Does it use Unix tools (grep, awk, sed) or PowerShell equivalents?
+```
+
+---
+
+## The agentic feedback loop
+
+What makes Claude Code powerful is not individual commands -- it is the ability to execute, observe results, and adjust:
+
+```
+User: "Fix the failing tests"
+
+Claude Code:
+1. Run tests -> see which tests fail
+2. Read the failing test files
+3. Read the implementation files they test
+4. Generate a fix
+5. Apply the fix
+6. Run tests again -> verify they pass
+7. Report result
+```
+
+Each step's output feeds into the next. This feedback loop can accomplish complex tasks without constant user input.
+
+**Where it goes wrong on Windows:**
+
+- Test runner output format differs between shells -- parsing may fail
+- File paths in error output may use different separators
+- Exit codes may differ between Windows and Unix tools
+- stdout/stderr mixing can confuse output parsing
+
+Each of these is a Windows-specific integration point that the platform engineer owns.
+
+---
+
+## Safety patterns in AI-CLI workflows
+
+Well-designed AI-CLI tools implement several safety patterns:
+
+**Show before execute:**
+```
+Claude Code: I want to run the following command:
+  Remove-Item -Recurse .\dist
+
+Proceed? [y/N]
+```
+
+**Dry run mode:**
+```
+Claude Code: In dry run mode. Would have:
+  - Deleted: .\dist\index.js
+  - Created: .\dist\index.js (new version)
+  - Ran: npm test
+```
+
+**Scope limitation:**
+Claude Code only operates within the current working directory by default. It should not read or write files outside the project directory without explicit confirmation.
+
+**Undo capability:**
+For file modifications, keeping a git-staged or backed-up version allows reverting AI changes if they are wrong.
+
+---
 
 ## Quick Lab
 
-### In CMD
+### Step 1 -- Test shell context detection
 
-<pre>
-  <code>
-{`echo %CD%
-where python
-echo %PATH%`}
-  </code>
-</pre>
+```powershell
+# Run Claude Code and ask it:
+# "What shell am I using and what is my current PATH?"
+# Verify the answer is correct
 
-### In PowerShell
+# Compare output in PowerShell vs CMD vs Git Bash
+```
 
-<pre>
-  <code>
-{`Get-Location
-Get-Command python
-$env:PATH`}
-  </code>
-</pre>
+### Step 2 -- Verify a generated command before running
+
+```powershell
+# Ask Claude Code to suggest a command to list all TypeScript files
+# Before running it:
+# 1. Does the syntax match your shell?
+# 2. What will it actually output?
+# 3. Does it have any side effects?
+```
+
+### Step 3 -- Observe the feedback loop
+
+```powershell
+# Ask Claude Code to find and fix a simple issue in the Study Hub codebase
+# Watch how it reads files, generates a fix, and verifies the result
+# Notice: does it correctly handle Windows path formats?
+```
+
+---
 
 ## What to Notice
 
-- Both environments can expose location, command resolution, and PATH, but they do so differently
-- CMD uses `%VARIABLE%` syntax, while PowerShell uses `$env:VARIABLE`
-- `where` in CMD and `Get-Command` in PowerShell may reveal different details about command resolution
-- AI often gives a command that is correct in one shell but wrong in another
-- Engineers commonly misunderstand that “works on my terminal” does not always mean “works everywhere”
+- Shell context detection is an active engineering responsibility -- if Claude generates wrong-shell commands, the integration is broken
+- Verification before execution is not optional for destructive commands -- the AI has context but not certainty
+- The agentic feedback loop is powerful but requires correct output parsing at each step -- Windows output formats differ from Unix
+- Safety patterns (show before execute, scope limitation, undo) are engineering decisions that directly affect developer trust
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing when a command is resolved  
-• why the behavior differs between shells  
-• how you would verify an AI-generated command before using it in a real environment  
+- How shell context affects AI-generated command correctness
+- What the agentic feedback loop is and where it breaks on Windows
+- What safety patterns should be built into an AI-CLI tool
+- How you would verify an AI-generated command before executing it
 
-<Quiz
-  question="What is a good principle for using AI in CLI workflows?"
-  options={[
-    "Trust all generated commands immediately",
-    "Use AI output without validation in production",
-    "Treat AI as a helper and verify outputs before acting on them",
-    "Avoid human review entirely"
+Strong answer:
+
+"AI-assisted CLI workflows are only as good as the shell context they operate in. If Claude Code generates a command for bash when the user is in PowerShell, it fails immediately. The Windows platform engineer's job is ensuring that context -- shell type, PATH, working directory, OS version -- is correctly detected and communicated to the model. The agentic loop (execute, observe, adjust) is what makes the tool powerful, but each step involves parsing output that looks different on Windows than Unix. Safety is an engineering decision: showing commands before execution, limiting scope to the working directory, and providing undo capability are not nice-to-haves, they are what makes developers trust the tool."
+
+---
+
+<QuizSet
+  title="AI-Assisted CLI Workflows Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why is shell context critical for AI-generated commands in Claude Code?",
+      options: [
+        "The AI needs to know your username",
+        "Commands that are valid in one shell may not exist or behave differently in another -- wrong context produces wrong commands",
+        "Shell context affects network speed",
+        "The AI cannot generate commands without knowing the shell"
+      ],
+      answer: "Commands that are valid in one shell may not exist or behave differently in another -- wrong context produces wrong commands",
+      explanation: "A command like &apos;grep&apos; does not exist in CMD. &apos;Get-ChildItem&apos; does not exist in bash. If Claude generates commands for the wrong shell, they fail immediately. Correct shell context detection is a core engineering responsibility for the Windows platform role."
+    },
+    {
+      question: "What should you do before executing an AI-generated command that deletes files?",
+      options: [
+        "Run it immediately -- the AI is always correct",
+        "Preview what files would be affected, verify the scope is correct, and understand the side effects",
+        "Ask a colleague to run it instead",
+        "Disable antivirus first"
+      ],
+      answer: "Preview what files would be affected, verify the scope is correct, and understand the side effects",
+      explanation: "AI-generated commands are suggestions based on the AI&apos;s understanding of your intent. Destructive operations should always be previewed -- list the files that would be affected before deleting them, check the scope is right, and verify the command matches what you actually want."
+    },
+    {
+      question: "What is the agentic feedback loop in Claude Code?",
+      options: [
+        "A loop where the AI asks for confirmation on every action",
+        "The cycle of executing a command, observing the output, and using that output to inform the next action",
+        "A way to repeat the same command multiple times",
+        "A loop that runs tests continuously"
+      ],
+      answer: "The cycle of executing a command, observing the output, and using that output to inform the next action",
+      explanation: "Claude Code can run a test, read the failure output, find the relevant code, apply a fix, and run the test again -- each step informed by the previous result. This feedback loop enables complex multi-step tasks. On Windows, correct output parsing at each step is critical because test runner output and error formats differ from Unix."
+    }
   ]}
-  answer="Treat AI as a helper and verify outputs before acting on them"
-  explanation="AI can accelerate workflows, but commands, file operations, and automation steps still need human review and validation."
 />

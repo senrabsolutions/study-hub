@@ -1,60 +1,255 @@
-# Lesson Title
+# PATH Conflicts on Windows
 
 ## Why this matters
 
-Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+PATH conflicts are one of the most frustrating Windows debugging problems because the symptom -- a wrong version of a tool running, or a tool failing silently -- looks nothing like the cause. You installed the right version. The installer said it succeeded. But the wrong binary is running.
+
+This comes up constantly in developer environments and is one of the most common reasons Claude Code behaves differently on one Windows machine vs another.
+
+---
 
 ## Key Concepts
 
-- Concept one
-- Concept two
-- Concept three
-- Concept four
+- Windows searches PATH entries in order -- the first match wins
+- Multiple versions of a tool can exist on PATH simultaneously
+- PATH entries are accumulated from multiple sources with no deduplication
+- The order of entries differs between User PATH and System PATH
+- Installers often silently add entries without removing old ones
 
-## Quick Summary
+---
 
-Summarize the core idea in plain language so it can be quickly reviewed during interview prep.
+## How PATH conflicts happen
+
+When you run `node`, Windows searches your PATH directories in order and runs the first `node.exe` it finds. If you have Node 18 installed via one method and Node 20 installed via another, whichever directory appears first in PATH wins -- regardless of which version is "current."
+
+Common scenarios that create conflicts:
+
+**Multiple package managers installing the same tool:**
+```
+C:\Program Files\nodejs\         (installed by official installer)
+C:\Users\logan\AppData\Roaming\nvm\versions\node\v20.0.0\  (installed by nvm)
+C:\ProgramData\chocolatey\bin\   (installed by Chocolatey)
+```
+
+If all three are on PATH, the first one found wins. The other two are silently ignored.
+
+**Old installation left behind:**
+```
+C:\Python27\          (Python 2.7, never uninstalled)
+C:\Python311\         (Python 3.11, current)
+```
+
+If `C:\Python27` comes first in PATH, `python` resolves to Python 2.7 even though Python 3.11 is "installed."
+
+**User PATH vs System PATH ordering:**
+
+Windows combines User PATH and System PATH. On most systems, User PATH is prepended to System PATH -- meaning user-level installs take priority over system-level installs. But this depends on whether the installer modified User PATH or System PATH.
+
+---
+
+## Diagnosing a PATH conflict
+
+### Step 1 -- See what is actually running
+
+```powershell
+# Where is the command resolving?
+Get-Command node | Select-Object -ExpandProperty Source
+
+# Shows only the FIRST match -- the one that wins
+where.exe node
+```
+
+### Step 2 -- See ALL matches in PATH order
+
+```powershell
+# where.exe shows every match, in PATH priority order
+where.exe node
+# Output:
+# C:\Users\logan\AppData\Roaming\nvm\versions\node\v18.0.0\node.exe
+# C:\Program Files\nodejs\node.exe
+# The first line wins
+
+where.exe python
+where.exe git
+```
+
+### Step 3 -- Inspect the full PATH
+
+```powershell
+# See PATH split into individual entries
+$env:PATH -split ";" | Where-Object { $_ -ne "" }
+
+# Or see User PATH and System PATH separately
+[Environment]::GetEnvironmentVariable("PATH", "User") -split ";"
+[Environment]::GetEnvironmentVariable("PATH", "Machine") -split ";"
+```
+
+### Step 4 -- Check which entry comes first
+
+```powershell
+# Find which PATH entries contain a specific tool
+$env:PATH -split ";" | Where-Object { Test-Path (Join-Path $_ "node.exe") }
+```
+
+---
+
+## Real-world example: the wrong Git
+
+A developer installed Git via the official installer, then later installed GitHub Desktop which ships its own bundled Git. Their PATH now contains:
+
+```
+C:\Users\logan\AppData\Local\GitHubDesktop\app-3.3.0\resources\app\git\cmd
+C:\Program Files\Git\cmd
+```
+
+GitHub Desktop's Git appears first. When they run `git --version` they get an older version. When Claude Code spawns `git` as a subprocess, it gets GitHub Desktop's Git, not the system Git -- which may behave differently, especially for large repos or certain operations.
+
+**Diagnosis:**
+```powershell
+where.exe git
+# C:\Users\logan\AppData\Local\GitHubDesktop\app-3.3.0\resources\app\git\cmd\git.exe
+# C:\Program Files\Git\cmd\git.exe
+```
+
+**Fix options:**
+1. Reorder PATH so the desired entry comes first
+2. Uninstall the conflicting version
+3. Use full paths in scripts instead of relying on PATH resolution
+
+---
+
+## Fixing PATH order
+
+```powershell
+# Open environment variables GUI
+rundll32 sysdm.cpl,EditEnvironmentVariables
+
+# Or edit directly via PowerShell (current session only)
+$env:PATH = "C:\Program Files\Git\cmd;" + $env:PATH
+
+# Permanently edit User PATH
+$current = [Environment]::GetEnvironmentVariable("PATH", "User")
+[Environment]::SetEnvironmentVariable("PATH", "C:\Program Files\Git\cmd;$current", "User")
+```
+
+---
+
+## PATH conflicts and Claude Code
+
+When Claude Code spawns subprocesses -- running tests, executing git commands, invoking build tools -- it inherits the PATH of the shell that launched it. If that shell has a PATH conflict, Claude Code will run the wrong version of tools.
+
+This is why "works on my machine" problems are common with Claude Code on Windows. Two developers with the same tools installed but different PATH orders will see different behavior from the same Claude Code commands.
+
+The diagnostic approach is always the same: `where.exe toolname` to see what actually runs, then trace back to which PATH entry is winning.
+
+---
 
 ## Quick Lab
 
-### In CMD
+### Step 1 -- Find conflicts on your system
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+```powershell
+# Check if any tool has multiple versions on PATH
+foreach ($tool in @("node", "python", "git", "npm")) {
+    $locations = where.exe $tool 2>$null
+    if ($locations -is [array] -and $locations.Count -gt 1) {
+        Write-Host "CONFLICT: $tool found in multiple locations:"
+        $locations | ForEach-Object { Write-Host "  $_" }
+    } else {
+        Write-Host "OK: $tool -> $locations"
+    }
+}
+```
 
-### In PowerShell
+### Step 2 -- Inspect your full PATH for duplicates
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+```powershell
+$entries = $env:PATH -split ";" | Where-Object { $_ -ne "" }
+$duplicates = $entries | Group-Object | Where-Object { $_.Count -gt 1 }
+if ($duplicates) {
+    Write-Host "Duplicate PATH entries:"
+    $duplicates | ForEach-Object { Write-Host "  $($_.Name)" }
+} else {
+    Write-Host "No duplicate PATH entries found"
+}
+```
+
+### Step 3 -- Verify the version Claude Code would use
+
+```powershell
+# Simulate what a subprocess would see
+$env:PATH -split ";" | ForEach-Object {
+    $node = Join-Path $_ "node.exe"
+    if (Test-Path $node) {
+        Write-Host "First node.exe found: $node"
+        & $node --version
+        break
+    }
+}
+```
+
+---
 
 ## What to Notice
 
-- What differs between environments
-- What debugging clues appear
-- What engineers typically misunderstand
+- `where.exe` always shows results in PATH priority order -- the first result is what runs
+- User PATH is typically prepended to System PATH, so user installs take priority
+- Installers rarely clean up old PATH entries when updating -- conflicts accumulate over time
+- The PATH a subprocess sees is inherited from its parent -- fixing PATH in one shell does not fix subprocesses spawned from other shells
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing  
-• why the behavior differs  
-• how you would debug it in a real environment
+- How Windows resolves commands when multiple versions exist on PATH
+- How to identify which version of a tool is actually running
+- Why two machines with the same software installed can behave differently
+- How PATH conflicts affect subprocesses spawned by tools like Claude Code
 
-<Quiz
-  question="What is a common symptom of a PATH conflict on Windows?"
-  options={[
-    "A command resolves to a different executable than expected",
-    "The system stops supporting environment variables",
-    "PowerShell becomes unable to run scripts",
-    "The registry deletes PATH automatically"
+Strong answer:
+
+"PATH conflicts on Windows happen when multiple versions of a tool are installed and their directories are all on PATH. Windows runs the first one it finds. I diagnose this with where.exe which shows all matches in PATH priority order -- the first result is what actually runs. The common fix is reordering PATH entries or removing the conflicting installation. With Claude Code specifically, this matters because any subprocess Claude Code spawns inherits the PATH of the shell that launched it, so PATH conflicts directly affect which tools Claude Code uses."
+
+---
+
+<QuizSet
+  title="PATH Conflicts Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "You have two versions of Node installed. How do you find out which one runs when you type &apos;node&apos;?",
+      options: [
+        "Check Add/Remove Programs",
+        "Run where.exe node -- it shows all matches in PATH priority order",
+        "Run node --version and guess",
+        "Check the registry"
+      ],
+      answer: "Run where.exe node -- it shows all matches in PATH priority order",
+      explanation: "where.exe shows every match for a command across all PATH entries in the order they would be found. The first result is the one that actually runs. Get-Command only shows the first match and does not reveal conflicts."
+    },
+    {
+      question: "A developer has Python 3.11 installed but &apos;python --version&apos; shows Python 2.7. What is the most likely cause?",
+      options: [
+        "Python 3.11 failed to install correctly",
+        "Python 2.7 is earlier in PATH than Python 3.11",
+        "Windows does not support Python 3",
+        "The version flag is broken"
+      ],
+      answer: "Python 2.7 is earlier in PATH than Python 3.11",
+      explanation: "Windows runs the first match found in PATH. If Python 2.7&apos;s directory appears before Python 3.11&apos;s directory in PATH, Python 2.7 wins regardless of which was installed more recently."
+    },
+    {
+      question: "Why might Claude Code use a different version of git than what a developer sees when they run &apos;git --version&apos; in their terminal?",
+      options: [
+        "Claude Code has its own built-in git",
+        "Claude Code ignores PATH entirely",
+        "Claude Code spawns subprocesses that inherit PATH from the shell that launched it, which may differ from an interactive session",
+        "Git does not work with Claude Code"
+      ],
+      answer: "Claude Code spawns subprocesses that inherit PATH from the shell that launched it, which may differ from an interactive session",
+      explanation: "Subprocess PATH inheritance means the environment a tool sees depends on how it was launched. If Claude Code is launched from a shell with a different PATH ordering than an interactive terminal session, it may resolve commands differently."
+    }
   ]}
-  answer="A command resolves to a different executable than expected"
-  explanation="PATH conflicts often happen when multiple versions of a tool are installed and Windows finds the wrong one first."
 />

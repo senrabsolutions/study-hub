@@ -1,60 +1,323 @@
-# Lesson Title
+# winget: Windows Package Manager
 
 ## Why this matters
 
-Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+winget is Microsoft's official package manager, built into Windows 10/11. For a Windows platform engineer, understanding winget deeply matters for two reasons: distributing CLI tools to Windows users cleanly, and diagnosing installation failures when winget is part of the problem.
+
+Claude Code needs reliable installation on Windows. winget is one of the primary distribution channels. Knowing how winget works under the hood helps you design better installers and debug the failures users report.
+
+---
 
 ## Key Concepts
 
-- Concept one
-- Concept two
-- Concept three
-- Concept four
+- winget is built into Windows 10 (1809+) and Windows 11 via the App Installer package
+- Packages come from the WinGet Community Repository on GitHub
+- winget handles installation, upgrade, uninstall, and search
+- Package manifests define how winget finds, downloads, installs, and verifies packages
+- winget does not always update PATH automatically -- this is a common source of "installed but not found" reports
 
-## Quick Summary
+---
 
-Summarize the core idea in plain language so it can be quickly reviewed during interview prep.
+## Basic usage
+
+```powershell
+# Search for a package
+winget search nodejs
+winget search "Visual Studio Code"
+
+# Install a package
+winget install OpenJS.NodeJS
+winget install Microsoft.VisualStudioCode
+winget install Git.Git
+
+# Install silently (no prompts -- useful for automation)
+winget install OpenJS.NodeJS --silent
+
+# Install a specific version
+winget install OpenJS.NodeJS --version 20.11.0
+
+# Show installed packages
+winget list
+
+# Check for upgrades
+winget upgrade
+
+# Upgrade a specific package
+winget upgrade OpenJS.NodeJS
+
+# Upgrade everything
+winget upgrade --all
+
+# Uninstall
+winget uninstall OpenJS.NodeJS
+
+# Show package details
+winget show OpenJS.NodeJS
+```
+
+---
+
+## Package IDs
+
+Every winget package has a unique ID in the format `Publisher.PackageName`:
+
+```
+OpenJS.NodeJS
+Microsoft.VisualStudioCode
+Git.Git
+Anthropic.Claude
+JetBrains.WebStorm
+```
+
+Using the full ID is more reliable than searching by name -- names can be ambiguous and match multiple packages.
+
+```powershell
+# Ambiguous -- might match multiple packages
+winget install node
+
+# Explicit -- no ambiguity
+winget install OpenJS.NodeJS
+```
+
+---
+
+## How winget installs packages
+
+winget is a package manager, not an installer itself. It:
+
+1. Looks up the package manifest in the WinGet Community Repository
+2. Downloads the installer (MSI, MSIX, EXE, ZIP, etc.)
+3. Runs the installer silently or interactively
+4. Optionally verifies the hash of the downloaded file
+
+This means winget's install experience is only as good as the underlying installer. If an MSI installs to a non-standard location and does not add itself to PATH, winget cannot fix that.
+
+---
+
+## PATH and winget
+
+This is the most common issue users report after using winget:
+
+```powershell
+winget install OpenJS.NodeJS
+# ✓ Successfully installed
+
+node --version
+# 'node' is not recognized as an internal or external command
+```
+
+What happened: Node was installed but the current PowerShell session does not have the updated PATH. The installer added Node to PATH, but the current session inherited the old PATH before the install.
+
+**Fixes:**
+
+```powershell
+# Option 1: Open a new terminal (picks up updated PATH)
+# Close PowerShell, open a new one
+
+# Option 2: Refresh PATH in current session
+$env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + 
+            [System.Environment]::GetEnvironmentVariable("PATH", "User")
+
+# Option 3: Use the full path temporarily
+& "C:\Program Files\nodejs\node.exe" --version
+```
+
+---
+
+## winget source management
+
+winget pulls packages from configured sources. The default source is the WinGet Community Repository:
+
+```powershell
+# List configured sources
+winget source list
+
+# Output:
+# Name    Argument
+# ------  -----------------------------------------
+# winget  https://cdn.winget.microsoft.com/cache
+
+# Add a custom source (for enterprise/internal packages)
+winget source add --name mycompany --arg https://internal.example.com/winget
+
+# Update source cache
+winget source update
+```
+
+Enterprise environments often configure a custom winget source pointing to an internal package feed. This lets them distribute internally-approved tools the same way users install public packages.
+
+---
+
+## Exporting and restoring packages
+
+winget can export your installed packages and restore them on a new machine -- useful for dev environment setup:
+
+```powershell
+# Export all installed packages to a JSON file
+winget export -o packages.json
+
+# Import and install everything from that file
+winget import -i packages.json
+```
+
+This is similar to a `requirements.txt` for your Windows dev environment.
+
+---
+
+## The winget manifest format
+
+Understanding manifests helps you publish and debug packages. A minimal winget manifest:
+
+```yaml
+PackageIdentifier: Anthropic.ClaudeCode
+PackageVersion: 1.0.0
+PackageName: Claude Code
+Publisher: Anthropic
+License: Proprietary
+ShortDescription: AI-powered coding assistant CLI
+Installers:
+  - Architecture: x64
+    InstallerType: exe
+    InstallerUrl: https://releases.anthropic.com/claude-code/1.0.0/claude-code-win-x64.exe
+    InstallerSha256: <sha256 hash>
+    InstallerSwitches:
+      Silent: /S
+      SilentWithProgress: /S
+ManifestType: singleton
+ManifestVersion: 1.4.0
+```
+
+The `InstallerSha256` is verified after download -- if the hash does not match, winget refuses to run the installer. This is the security verification step.
+
+---
+
+## Comparing winget to Chocolatey
+
+| Feature | winget | Chocolatey |
+|---|---|---|
+| Built into Windows | Yes (Win 10 1809+) | No -- must install |
+| Package count | ~6,000+ | ~9,000+ |
+| Enterprise features | Limited | Extensive (paid) |
+| Custom feeds | Yes | Yes |
+| Script execution | No | Yes (PowerShell install scripts) |
+| Reliability | Improving | Battle-tested |
+
+For consumer/developer tools, winget is usually fine. For enterprise deployment with complex installation logic, Chocolatey's PowerShell scripts offer more control.
+
+---
+
+## Automating with winget in scripts
+
+```powershell
+# Check if a package is installed
+$installed = winget list --id OpenJS.NodeJS 2>$null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "Node.js is installed"
+} else {
+    Write-Host "Node.js is not installed"
+    winget install OpenJS.NodeJS --silent --accept-package-agreements --accept-source-agreements
+}
+```
+
+Key flags for scripting:
+- `--silent` -- no interactive prompts
+- `--accept-package-agreements` -- accept license agreements automatically
+- `--accept-source-agreements` -- accept source terms automatically
+- `--disable-interactivity` -- fail rather than prompt
+
+---
 
 ## Quick Lab
 
-### In CMD
+### Step 1 -- Explore winget
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+```powershell
+# Check winget version
+winget --version
 
-### In PowerShell
+# Search for Node
+winget search nodejs
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+# Show details about Node
+winget show OpenJS.NodeJS
+```
+
+### Step 2 -- Export your current packages
+
+```powershell
+winget export -o "$env:USERPROFILE\Desktop\my-packages.json"
+notepad "$env:USERPROFILE\Desktop\my-packages.json"
+```
+
+### Step 3 -- Check available upgrades
+
+```powershell
+winget upgrade
+# Shows packages with available updates
+```
+
+---
 
 ## What to Notice
 
-- What differs between environments
-- What debugging clues appear
-- What engineers typically misunderstand
+- The full package ID (`Publisher.PackageName`) is more reliable than searching by name
+- PATH is not automatically refreshed in the current session after winget installs something -- this causes most "installed but not found" reports
+- winget is a front-end -- the actual install is done by MSI, EXE, or MSIX installers; their quality varies
+- `--accept-package-agreements` and `--accept-source-agreements` are required for fully non-interactive scripting
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing  
-• why the behavior differs  
-• how you would debug it in a real environment
+- How winget installs packages and why PATH may not update immediately
+- The package ID format and why it matters
+- How winget compares to Chocolatey for different use cases
+- What a winget manifest contains and why the SHA256 matters
 
-<Quiz
-  question="Why does package-manager support improve the developer experience of a CLI tool on Windows?"
-  options={[
-    "Because it makes installation and upgrades more consistent",
-    "Because it removes the need for documentation",
-    "Because it guarantees cross-platform compatibility",
-    "Because it automatically fixes PATH conflicts"
+Strong answer:
+
+"winget is a package manager front-end that downloads and runs underlying installers -- MSI, EXE, or MSIX. The most common user complaint is that a tool is installed but not found, which is almost always a PATH refresh issue: the installer added the tool to PATH but the current terminal session has the old PATH. The fix is opening a new terminal or refreshing PATH programmatically. For distributing Claude Code via winget, the key is the manifest's SHA256 hash which winget verifies before running the installer -- this is the security verification step."
+
+---
+
+<QuizSet
+  title="winget Basics Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "A user runs &apos;winget install OpenJS.NodeJS&apos; successfully but &apos;node&apos; is not found. What is the most likely cause?",
+      options: [
+        "winget failed silently",
+        "The current terminal session has the old PATH -- Node was added to PATH but the session needs to be refreshed",
+        "Node.js does not support winget",
+        "The user does not have admin rights"
+      ],
+      answer: "The current terminal session has the old PATH -- Node was added to PATH but the session needs to be refreshed",
+      explanation: "winget installs the package and the installer updates PATH in the registry. But the current PowerShell or CMD session inherited the old PATH before the install. Opening a new terminal or refreshing PATH programmatically fixes it."
+    },
+    {
+      question: "Why is using the full package ID (Publisher.PackageName) better than a short name with winget?",
+      options: [
+        "Short names are not supported",
+        "Full IDs are unique and unambiguous -- short names can match multiple packages",
+        "winget is faster with full IDs",
+        "Short names require admin rights"
+      ],
+      answer: "Full IDs are unique and unambiguous -- short names can match multiple packages",
+      explanation: "Searching by name like &apos;node&apos; can match dozens of packages. The full ID like OpenJS.NodeJS is globally unique in the winget repository, making scripts and automation reliable."
+    },
+    {
+      question: "What does winget verify using the InstallerSha256 field in a package manifest?",
+      options: [
+        "That the package is from a Microsoft-approved publisher",
+        "That the downloaded installer file has not been tampered with or corrupted",
+        "That the user has a valid Windows license",
+        "That the installation directory has enough space"
+      ],
+      answer: "That the downloaded installer file has not been tampered with or corrupted",
+      explanation: "winget downloads the installer then computes its SHA256 hash and compares it to the hash in the manifest. If they do not match, winget refuses to run the installer. This prevents running a corrupted or tampered installer even if the download URL was compromised."
+    }
   ]}
-  answer="Because it makes installation and upgrades more consistent"
-  explanation="Package-manager support reduces install friction, improves discoverability, and gives users clearer upgrade and uninstall workflows."
 />

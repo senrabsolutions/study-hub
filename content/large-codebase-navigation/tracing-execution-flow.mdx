@@ -2,59 +2,304 @@
 
 ## Why this matters
 
-Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+When something behaves unexpectedly, the fastest path to understanding is tracing exactly what happens when a specific input enters the system. Not reading all the code -- tracing one specific path through it. This is the skill that lets you diagnose a bug in 20 minutes instead of 2 hours.
+
+For Claude Code specifically: when a Windows user reports "my file edit was applied incorrectly" or "the wrong shell command ran," tracing the execution flow from user input to the affected behavior is how you find the bug.
+
+---
 
 ## Key Concepts
 
-- Concept one
-- Concept two
-- Concept three
-- Concept four
+- Execution tracing follows a specific input through the system step by step
+- Static tracing uses code reading and tools like Find All References
+- Dynamic tracing uses a debugger or logging to follow live execution
+- The entry point for any behavior is usually a command, an event, or an API call
+- Side effects (file writes, subprocess spawns, API calls) are the checkpoints to trace between
 
-## Quick Summary
+---
 
-Practice following how control moves through an unfamiliar codebase.
+## Static tracing -- reading the code path
+
+Static tracing means following the code without running it. You start at a known point and follow the chain of calls.
+
+**Example: How does a file edit command flow through Claude Code?**
+
+### Step 1 -- Find where the command enters the system
+
+```bash
+# Search for where "edit" or "write_file" is handled
+grep -rn "write_file\|edit_file\|EditFile" src/ --include="*.ts" | grep -v ".test." | head -20
+
+# Find where tool calls are dispatched
+grep -rn "tool_use\|toolCall\|executeTool" src/ --include="*.ts" | head -20
+```
+
+### Step 2 -- Follow the call chain
+
+Once you find the entry point, follow each function call:
+
+```typescript
+// You find: handleToolCall(toolName, input)
+// -> calls writeFile(input.path, input.content)
+// -> calls validatePath(path)
+// -> calls fs.writeFile(resolvedPath, content)
+```
+
+Document this as you go. A simple list of function names is enough:
+
+```
+handleToolCall
+  -> writeFile
+    -> validatePath  (check: does this normalize Windows paths?)
+    -> fs.writeFile
+      -> emits 'success' or catches error
+```
+
+### Step 3 -- Identify the decision points
+
+Where does the behavior branch?
+
+```typescript
+function writeFile(path: string, content: string) {
+  const resolved = resolvePath(path);  // <-- Windows path normalization?
+  
+  if (process.platform === "win32") {  // <-- Platform branch
+    return writeFileWindows(resolved, content);
+  }
+  return writeFileUnix(resolved, content);
+}
+```
+
+These branches are where platform-specific bugs live.
+
+---
+
+## Dynamic tracing -- following live execution
+
+When static tracing is not enough, run the code and observe it.
+
+### Using console.log (fast and dirty)
+
+```typescript
+// Add temporary logging at each step you want to observe
+function writeFile(path: string, content: string) {
+  console.log("[DEBUG writeFile] input path:", path);
+  
+  const resolved = resolvePath(path);
+  console.log("[DEBUG writeFile] resolved path:", resolved);
+  
+  // ... rest of function
+}
+```
+
+Prefix with a tag so you can grep or filter the output easily.
+
+### Using the Node.js debugger in VS Code
+
+```json
+// .vscode/launch.json
+{
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug CLI",
+      "program": "${workspaceFolder}/src/index.ts",
+      "args": ["run", "test-file.ts"],
+      "runtimeArgs": ["--loader", "ts-node/esm"],
+      "sourceMaps": true
+    }
+  ]
+}
+```
+
+Set a breakpoint at the entry point, then step through with:
+- `F10` -- Step over (execute current line, don't go into functions)
+- `F11` -- Step into (follow the function call)
+- `Shift+F11` -- Step out (finish current function, return to caller)
+- `F5` -- Continue to next breakpoint
+
+### The watch window
+
+When stopped at a breakpoint, the VS Code watch window lets you inspect variables:
+
+```
+path        = "//C:/Users/logan/project/file.ts"
+resolved    = "C:\Users\logan\project\file.ts"
+platform    = "win32"
+```
+
+This is how you verify that path normalization is working correctly.
+
+---
+
+## Tracing a real scenario: wrong file path on Windows
+
+A user reports: "Claude Code tried to write to `//C:/project/file.ts` but the path doesn't exist."
+
+### Trace plan:
+
+1. Find where file paths come from in the session -- is it from the model's tool call, or constructed by Claude Code?
+2. Find where path normalization happens
+3. Find where the write actually executes
+4. Identify which step produces the malformed path
+
+```bash
+# Step 1: Find where tool inputs are received
+grep -rn "tool_use\|toolInput\|input.path" src/ --include="*.ts"
+
+# Step 2: Find path normalization
+grep -rn "normalizePath\|resolvePath\|path.resolve" src/ --include="*.ts"
+
+# Step 3: Find the write call
+grep -rn "fs.writeFile\|writeFileSync\|createWriteStream" src/ --include="*.ts"
+```
+
+The trace leads you to the specific line where `//C:/` is introduced -- probably a path join that doubles the slash when combining a base path with a model-provided path.
+
+---
+
+## Reading stack traces
+
+When an error is thrown, the stack trace is a pre-traced execution path:
+
+```
+Error: ENOENT: no such file or directory, open '//C:/project/file.ts'
+    at Object.openSync (node:fs:596:3)
+    at Object.writeFileSync (node:fs:2292:35)
+    at writeFile (/project/src/tools/file-write.ts:47:10)
+    at executeTool (/project/src/tools/index.ts:23:5)
+    at handleToolCall (/project/src/session.ts:156:12)
+    at processMessage (/project/src/session.ts:89:7)
+```
+
+Read this bottom-up for the call chain:
+1. `processMessage` was called
+2. It called `handleToolCall`
+3. Which called `executeTool`
+4. Which called `writeFile`
+5. Which called `writeFileSync`
+6. Which threw because `//C:/project/file.ts` does not exist
+
+Now you know exactly where to look: `file-write.ts:47` and how the path arrived there.
+
+---
+
+## Using git bisect to find when a regression was introduced
+
+If something worked before and broke now, `git bisect` finds the exact commit:
+
+```bash
+# Start bisect
+git bisect start
+
+# Mark current commit as bad
+git bisect bad
+
+# Mark a known-good commit
+git bisect good v1.0.0
+
+# Git checks out a commit halfway between
+# Test: does the bug exist here?
+# If yes: git bisect bad
+# If no: git bisect good
+# Repeat until git identifies the exact commit
+```
+
+This binary search through history finds the breaking change in O(log n) steps.
+
+---
 
 ## Quick Lab
 
-### In CMD
+Do these exercises on the Study Hub codebase:
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+### Step 1 -- Trace how a quiz answer gets saved
 
-### In PowerShell
+```powershell
+# Find where quiz pass state is recorded
+grep -rn "markQuizPassed\|quizPassed" . --include="*.tsx" --include="*.ts"
+# Follow the chain from Quiz component -> ProgressProvider -> localStorage
+```
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+### Step 2 -- Trace how a track's lessons are loaded
+
+```powershell
+# Find the data loading chain
+grep -rn "getLessonsByTrack\|getTrackManifest" . --include="*.ts"
+# Trace: page.tsx -> lib/content.ts -> content/[track]/meta.ts
+```
+
+### Step 3 -- Read a stack trace
+
+```powershell
+# Cause an intentional error -- navigate to a non-existent lesson
+# Read the error in the browser console
+# Identify the call chain from the stack trace
+```
+
+---
 
 ## What to Notice
 
-- What differs between environments
-- What debugging clues appear
-- What engineers typically misunderstand
+- Stack traces are execution traces handed to you for free -- always read them bottom-up for the call chain
+- The decision points (if/else on platform, path branches) are where platform bugs live
+- `grep -rn` is your fastest tool for finding where something is defined or used
+- You do not need to trace the entire system -- trace from the symptom back to the cause
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing  
-• why the behavior differs  
-• how you would debug it in a real environment
+- How you would trace execution to find a bug you have never seen before
+- The difference between static and dynamic tracing and when to use each
+- How to read a stack trace to identify the relevant call chain
+- How `git bisect` helps when a bug appeared in a regression
 
-<Quiz
-  question="Why is tracing execution flow useful in a large repository?"
-  options={[
-    "It helps you understand how control moves through the system",
-    "It guarantees there are no bugs",
-    "It replaces the need for testing",
-    "It only matters in frontend projects"
+Strong answer:
+
+"When I get a bug report, my first step is to identify the symptom as precisely as possible -- not 'path is wrong' but 'path has //C:/ prefix when it should be C:\\'. Then I trace backwards from the output to the input: where is this path being constructed? I use grep to find the relevant code, follow the call chain statically, and add targeted logging if I need to see live values. Stack traces are gold -- they give you the exact call chain for free. For regressions, git bisect finds the exact breaking commit in minutes."
+
+---
+
+<QuizSet
+  title="Tracing Execution Flow Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "A stack trace shows an error at fs.writeFile, called from writeFile, called from executeTool, called from handleToolCall. Where should you look first for the bug causing a malformed path?",
+      options: [
+        "In fs.writeFile -- that is where the error was thrown",
+        "In handleToolCall or executeTool -- trace where the path was constructed before reaching writeFile",
+        "In Node.js itself",
+        "In the user&apos;s PATH environment variable"
+      ],
+      answer: "In handleToolCall or executeTool -- trace where the path was constructed before reaching writeFile",
+      explanation: "fs.writeFile throws because it received a bad path, but it did not create the bad path. The bug is upstream -- in the code that constructed the path before passing it to writeFile. Reading stack traces bottom-up shows you the call chain; the bug is usually in the middle where data was transformed incorrectly."
+    },
+    {
+      question: "What is the fastest way to find all the places in a TypeScript codebase that call a specific function?",
+      options: [
+        "Read every file manually",
+        "Use grep -rn &apos;functionName&apos; or VS Code Find All References (Shift+F12)",
+        "Check the README",
+        "Ask the original author"
+      ],
+      answer: "Use grep -rn &apos;functionName&apos; or VS Code Find All References (Shift+F12)",
+      explanation: "grep -rn searches all files recursively and shows file names and line numbers. VS Code&apos;s Find All References (Shift+F12) does the same with TypeScript-aware symbol resolution, so it finds renamed imports and aliases too. Both are dramatically faster than manual reading."
+    },
+    {
+      question: "When should you use dynamic tracing (debugger/logging) instead of static tracing (reading the code)?",
+      options: [
+        "Always -- static tracing is never useful",
+        "When the code path depends on runtime values that are hard to predict from reading alone",
+        "Only in production",
+        "Never -- reading code is always sufficient"
+      ],
+      answer: "When the code path depends on runtime values that are hard to predict from reading alone",
+      explanation: "Static tracing tells you what code can execute. Dynamic tracing tells you what code did execute with specific inputs. When a bug only appears with certain inputs, or when you need to see the actual values flowing through the system, dynamic tracing with a debugger or logging is faster than trying to mentally simulate every possible value."
+    }
   ]}
-  answer="It helps you understand how control moves through the system"
-  explanation="Tracing execution flow helps you follow inputs, configuration, decision points, and outputs so you can debug and modify behavior with less risk."
 />

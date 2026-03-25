@@ -1,66 +1,267 @@
-# X.509 Basics
+# X.509 Certificates: What CLI Engineers Actually Need to Know
 
 ## Why this matters
 
-X.509 certificates are a core part of how systems establish identity and trust. In real engineering work, they show up in HTTPS connections, code signing, package verification, WinRM, TLS-enabled services, internal PKI, and certificate-based authentication. If a certificate is expired, untrusted, misconfigured, or missing the right subject information, tools can fail in ways that look confusing at first: connection errors, trust warnings, signature failures, or authentication problems.
+X.509 certificates show up in CLI engineering in three concrete ways: HTTPS connections failing with certificate errors, code signing requirements for distributing tools on Windows and macOS, and corporate proxies intercepting TLS traffic. Understanding what certificates actually are -- not just that they exist -- means you can diagnose these failures instead of guessing.
 
-For Windows and CLI workflows, this matters because engineers often need to inspect certificates, validate trust chains, troubleshoot secure connections, and determine whether a failure is caused by the network, the service, or the certificate itself. Understanding the basics helps you debug faster and avoid treating every TLS or signing error like a generic “security problem.”
+---
 
 ## Key Concepts
 
-- X.509 certificates bind an identity to a public key
-- Certificates are used to establish trust for encryption, authentication, and signing
-- Trust depends on certificate chains, issuers, expiration, and store placement
-- CLI tools and Windows components may fail if certificates are invalid, untrusted, or mismatched
+- A certificate binds an identity (domain name, organization) to a public key
+- Trust is established through certificate chains -- your system trusts a root CA, the root CA signs intermediate CAs, intermediates sign end-entity certificates
+- Certificate stores on Windows and macOS are separate from Node.js's built-in CA bundle
+- Code signing on Windows uses certificates to prove a binary came from a verified publisher
+- Expiration, revocation, and purpose constraints are the main reasons valid-looking certificates fail
 
-## Quick Summary
+---
 
-X.509 certificates help systems verify identity and establish trust. In practice, engineers use them to secure connections, validate signatures, and troubleshoot why secure tools or services fail.
+## What a certificate actually contains
+
+An X.509 certificate is a structured data file that contains:
+
+```
+Subject:        CN=api.anthropic.com, O=Anthropic, C=US
+Issuer:         CN=DigiCert TLS RSA SHA256 2020 CA1 (the CA that signed this)
+Public Key:     [RSA 2048-bit public key]
+Valid From:     2024-01-01
+Valid Until:    2025-01-01
+Serial Number:  0A:1B:2C:3D:...
+Extensions:
+  Subject Alternative Names: api.anthropic.com, *.anthropic.com
+  Key Usage: Digital Signature, Key Encipherment
+  Extended Key Usage: TLS Web Server Authentication
+  Basic Constraints: CA:FALSE  (not a CA, cannot sign other certs)
+Signature:      [DigiCert's signature over all the above]
+```
+
+The signature is the critical part. DigiCert used their private key to sign this certificate. Your system trusts DigiCert's root certificate (it comes pre-installed in your trust store). So when you connect to `api.anthropic.com`, your system:
+
+1. Gets the server's certificate
+2. Verifies DigiCert's signature over it
+3. Checks DigiCert's certificate is in the trust store
+4. Checks the hostname matches Subject Alternative Names
+5. Checks the current date is within Valid From/Until
+6. If all checks pass: trust established
+
+---
+
+## Certificate chains
+
+A single root CA cannot sign every certificate -- that would be a security risk. Instead, root CAs sign intermediate CAs, which sign end-entity certificates:
+
+```
+DigiCert Root CA G2          (in your trust store, self-signed)
+  |
+  +-- DigiCert TLS RSA SHA256 2020 CA1   (intermediate, signed by root)
+        |
+        +-- api.anthropic.com            (end-entity, signed by intermediate)
+```
+
+When your browser or CLI tool connects to a server:
+1. The server sends its certificate plus any intermediate certificates
+2. Your system builds the chain from the end-entity up to a trusted root
+3. If the chain reaches a trusted root: valid
+4. If not: `UNABLE_TO_VERIFY_LEAF_SIGNATURE` or similar error
+
+**The missing intermediate certificate problem:**
+
+Servers sometimes fail to send the intermediate certificates. The end-entity certificate is valid, but your system cannot build a complete chain to a trusted root. This causes TLS errors that look like the certificate is invalid but it is not -- the server is just misconfigured.
+
+```bash
+# Check if a server sends the full chain
+openssl s_client -connect api.anthropic.com:443 -showcerts
+
+# Look for multiple -----BEGIN CERTIFICATE----- blocks
+# One = only end-entity (may fail if intermediate is missing from trust store)
+# Two or more = chain included (correct)
+```
+
+---
+
+## Windows certificate stores
+
+Windows maintains several certificate stores, separate from Node.js:
+
+```powershell
+# List trusted root CAs
+Get-ChildItem Cert:\LocalMachine\Root | Select-Object Subject, Thumbprint, NotAfter | Sort-Object Subject
+
+# List personal certificates (your own)
+Get-ChildItem Cert:\CurrentUser\My
+
+# List intermediate CAs
+Get-ChildItem Cert:\LocalMachine\CA
+
+# Find a specific certificate
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -like "*DigiCert*" }
+
+# Check if a certificate is expired
+Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.NotAfter -lt (Get-Date) }
+```
+
+```batch
+:: CMD equivalent
+certutil -store Root         :: trusted roots
+certutil -store My           :: personal
+certutil -store CA           :: intermediate CAs
+```
+
+**The Node.js separation problem:**
+
+Node.js bundles its own set of trusted CA certificates and does not use the Windows certificate store by default. This is why a corporate CA certificate installed in Windows does not automatically make Node.js trust connections signed by that CA.
+
+---
+
+## Code signing on Windows
+
+Windows requires or recommends code signing for:
+- Executables downloaded from the internet (Gatekeeper equivalent)
+- PowerShell scripts (when execution policy requires signing)
+- Driver packages (required)
+- Distributing via winget or Chocolatey (expected)
+
+```powershell
+# Check if an executable is signed
+Get-AuthenticodeSignature "C:\path\to\tool.exe"
+
+# Output shows:
+# Status: Valid  (or NotSigned, HashMismatch, etc.)
+# SignerCertificate: [certificate info]
+# TimeStamperCertificate: [timestamp info]
+
+# Sign a script (requires a code signing certificate)
+Set-AuthenticodeSignature -FilePath ".\script.ps1" -Certificate $cert
+```
+
+**Why unsigned tools cause problems:**
+
+When a user downloads an unsigned executable, Windows SmartScreen may block it or show a warning. In enterprise environments, unsigned code may be blocked entirely by Group Policy. For Claude Code distribution, code signing is essential for a smooth install experience.
+
+---
+
+## Reading certificate errors
+
+Common certificate errors and their meaning:
+
+| Error | Meaning |
+|---|---|
+| `CERT_HAS_EXPIRED` | Certificate's NotAfter date is in the past |
+| `UNABLE_TO_VERIFY_LEAF_SIGNATURE` | Cannot build chain to trusted root |
+| `SELF_SIGNED_CERT_IN_CHAIN` | A self-signed cert is in the chain (often corporate proxy) |
+| `CERT_COMMON_NAME_INVALID` | Hostname does not match Subject Alternative Names |
+| `ERR_TLS_CERT_ALTNAME_INVALID` | Same as above (Node.js version) |
+| `CERT_REVOKED` | Certificate was explicitly revoked |
+
+```javascript
+// In Node.js, TLS errors come through the error event
+https.get("https://example.com", (res) => { ... })
+  .on("error", (err) => {
+    console.error("Code:", err.code);     // e.g., "CERT_HAS_EXPIRED"
+    console.error("Message:", err.message);
+  });
+```
+
+---
 
 ## Quick Lab
 
-### In CMD
+### Step 1 -- Inspect a real certificate
 
-<pre className="rounded-xl border border-gray-200 bg-gray-100 p-4 text-sm overflow-x-auto dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100">
-  <code>
-{`certutil -store My
-certutil -store Root`}
-  </code>
-</pre>
+```powershell
+# View certificates in your trust store
+Get-ChildItem Cert:\LocalMachine\Root | 
+  Where-Object { $_.Subject -like "*Microsoft*" } |
+  Select-Object Subject, NotAfter, Thumbprint |
+  Format-List
 
-### In PowerShell
+# Count how many root CAs you trust
+(Get-ChildItem Cert:\LocalMachine\Root).Count
+```
 
-<pre className="rounded-xl border border-gray-200 bg-gray-100 p-4 text-sm overflow-x-auto dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100">
-  <code>
-{`Get-ChildItem Cert:\\CurrentUser\\My
-Get-ChildItem Cert:\\LocalMachine\\Root`}
-  </code>
-</pre>
+### Step 2 -- Check a website's certificate chain
+
+```powershell
+# Using .NET to inspect a remote certificate
+$request = [System.Net.WebRequest]::Create("https://api.anthropic.com")
+$response = $request.GetResponse()
+$cert = $request.ServicePoint.Certificate
+Write-Host "Subject: $($cert.Subject)"
+Write-Host "Issuer: $($cert.Issuer)"
+Write-Host "Expires: $($cert.GetExpirationDateString())"
+$response.Close()
+```
+
+### Step 3 -- Check Node.js CA bundle
+
+```javascript
+// How many CAs does Node trust?
+const tls = require("tls");
+console.log(`Node trusts ${tls.rootCertificates.length} root CAs`);
+```
+
+---
 
 ## What to Notice
 
-- Both environments let you inspect certificate stores, but they expose them differently
-- `certutil` is a classic Windows utility, while PowerShell exposes certificates through a provider-like path
-- You will see information such as issuer, subject, thumbprint, and expiration dates
-- Engineers often misunderstand that “having a certificate installed” is not the same as “the system trusts this certificate for the needed purpose”
-- Store location matters: Current User and Local Machine can produce different results and affect different tools
+- Certificate stores in Windows and Node.js are separate -- installing a corporate CA in Windows does not affect Node.js trust
+- Missing intermediate certificates are a common server misconfiguration that causes valid certificates to fail
+- `SELF_SIGNED_CERT_IN_CHAIN` almost always means a corporate TLS-intercepting proxy, not a real certificate problem
+- Code signing is not optional for professional CLI tool distribution on Windows
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what an X.509 certificate is actually doing in a secure system  
-• why trust chain, issuer, expiration, and store location matter  
-• how you would debug a certificate-related failure in a real environment  
+- What an X.509 certificate contains and how the chain of trust works
+- Why a certificate trusted by Windows might not be trusted by Node.js
+- What the most common TLS error codes mean
+- Why code signing matters for Windows CLI tool distribution
 
-<Quiz
-  question="What is one of the main purposes of an X.509 certificate?"
-  options={[
-    "To replace the operating system firewall",
-    "To bind an identity to a public key for trust and secure communication",
-    "To automatically encrypt every file on disk",
-    "To guarantee that a script is bug-free"
+Strong answer:
+
+"An X.509 certificate binds an identity to a public key and is signed by a certificate authority. Trust works through chains -- your system trusts root CAs, root CAs sign intermediate CAs, intermediates sign end-entity certificates. For Node.js specifically, the most important thing is that Node maintains its own CA bundle separate from Windows. Corporate proxy CAs added to Windows need to be explicitly configured in Node via NODE_EXTRA_CA_CERTS or they cause SELF_SIGNED_CERT_IN_CHAIN errors. For tool distribution, code signing prevents Windows SmartScreen from blocking the installer -- in enterprise environments, unsigned code may be blocked entirely."
+
+---
+
+<QuizSet
+  title="X.509 Certificates Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What does SELF_SIGNED_CERT_IN_CHAIN usually indicate in a corporate environment?",
+      options: [
+        "The server has an expired certificate",
+        "A TLS-intercepting proxy is re-signing traffic with a corporate CA that Node does not trust",
+        "The DNS lookup failed",
+        "The certificate file is corrupted"
+      ],
+      answer: "A TLS-intercepting proxy is re-signing traffic with a corporate CA that Node does not trust",
+      explanation: "Corporate proxies decrypt HTTPS traffic and re-sign it with an internal CA certificate. Node does not trust this internal CA (it is not in Node&apos;s built-in bundle), so every HTTPS connection looks self-signed. The fix is NODE_EXTRA_CA_CERTS pointing at the corporate CA certificate."
+    },
+    {
+      question: "A server has a valid certificate but some clients get UNABLE_TO_VERIFY_LEAF_SIGNATURE. What is the most likely cause?",
+      options: [
+        "The certificate has expired",
+        "The server is not sending the intermediate CA certificates in the TLS handshake",
+        "The client has too many root CAs",
+        "The hostname does not match"
+      ],
+      answer: "The server is not sending the intermediate CA certificates in the TLS handshake",
+      explanation: "Clients verify certificates by building a chain to a trusted root. If intermediate CAs are missing from the chain and the client does not have them cached, it cannot complete the chain. The server should include intermediates in the TLS handshake. Some clients have the intermediates cached and succeed; others do not and fail."
+    },
+    {
+      question: "Why does installing a corporate CA certificate in Windows not fix Node.js TLS errors from that CA?",
+      options: [
+        "Windows certificates are incompatible with Node",
+        "Node.js maintains its own CA bundle and does not read from the Windows certificate store by default",
+        "Corporate certificates are not valid for TLS",
+        "Node.js only trusts certificates from specific countries"
+      ],
+      answer: "Node.js maintains its own CA bundle and does not read from the Windows certificate store by default",
+      explanation: "Node.js bundles its own trusted root certificates compiled into the binary. It does not consult the Windows certificate store. Adding a CA to Windows helps browser and Windows API connections, but Node.js connections remain untrusted until NODE_EXTRA_CA_CERTS is set."
+    }
   ]}
-  answer="To bind an identity to a public key for trust and secure communication"
-  explanation="X.509 certificates are used to establish trust by associating an identity with a public key, which supports encryption, authentication, and signature validation."
 />

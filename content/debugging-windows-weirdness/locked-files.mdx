@@ -1,60 +1,282 @@
-# Locked Files
+# Locked Files on Windows
 
 ## Why this matters
 
-Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+Windows file locking is one of the most disruptive and least understood behaviors for developers coming from Unix backgrounds. On Linux and macOS, you can delete, replace, or move a file while it is open. On Windows, you usually cannot -- and the error message rarely tells you which process is holding the lock.
+
+This causes real failures in development workflows: builds that cannot replace output files, npm installs that fail mid-way, Claude Code that cannot write an edit because another process has the file open, test runners that cannot clean up temp files.
+
+---
 
 ## Key Concepts
 
-- Concept one
-- Concept two
-- Concept three
-- Concept four
+- Windows uses mandatory file locking -- open files are locked by default
+- Unix uses advisory locking -- processes can open the same file simultaneously
+- A locked file cannot be deleted, moved, or replaced until all handles are closed
+- The error message ("file in use", "access denied") rarely identifies the locking process
+- Antivirus software, search indexers, and editors are the most common hidden lockers
 
-## Quick Summary
+---
 
-Learn why Windows file locking breaks updates, builds, and cleanup operations.
+## How Windows file locking works
+
+When a process opens a file on Windows, it specifies a sharing mode:
+
+- `FILE_SHARE_READ` -- other processes can read but not write
+- `FILE_SHARE_WRITE` -- other processes can write
+- `FILE_SHARE_DELETE` -- other processes can delete
+- No sharing -- exclusive access
+
+Most applications open files without allowing deletion. This means the file is locked until the application closes its handle. Unlike Unix, there is no way to "unlink" a file while it is open.
+
+**The practical result:**
+
+```powershell
+# This works fine on Linux/macOS
+# On Windows it may fail if the file is open:
+Remove-Item ".\dist\app.js"
+# Error: The process cannot access the file 'app.js' because it is being used by another process.
+
+# npm install can fail mid-build:
+npm install
+# Error: EPERM: operation not permitted, rename 'node_modules\.staging\...' to 'node_modules\...'
+```
+
+---
+
+## Common sources of file locks in dev environments
+
+**Antivirus / Windows Defender**
+The most common culprit. AV scans files as they are written. During a build that creates many files rapidly, Defender can lock output files briefly while scanning them. This causes intermittent build failures that are extremely hard to reproduce.
+
+**Windows Search Indexer**
+The indexer monitors directories and indexes new files. It can briefly lock files in watched directories. Common in `Documents`, `Desktop`, and project directories.
+
+**VS Code**
+VS Code holds file watchers on open directories. Saving a file while VS Code has it open in another tab can cause conflicts.
+
+**Node.js / npm**
+npm creates lock files during installs. If a previous install was interrupted, the lock file may still exist. The `.staging` directory inside `node_modules` is particularly prone to locking issues.
+
+**Git**
+Git holds locks on `.git/index` during operations. Running two git commands simultaneously (e.g., in two terminals) can cause lock conflicts.
+
+---
+
+## Diagnosing which process holds a lock
+
+The error message on Windows does not tell you which process holds the lock. You have to find it yourself.
+
+### Method 1 -- Resource Monitor (GUI)
+
+```
+Win+R -> resmon.exe
+CPU tab -> Associated Handles
+Search for the filename
+```
+
+### Method 2 -- Handle.exe (Sysinternals)
+
+```powershell
+# Download from Microsoft Sysinternals
+# https://learn.microsoft.com/en-us/sysinternals/downloads/handle
+
+handle.exe "filename.txt"
+# Output:
+# explorer.exe    pid: 1234   type: File   C:\path\to\filename.txt
+```
+
+### Method 3 -- PowerShell (limited but no extra tools)
+
+```powershell
+# Find processes with open handles to a specific path
+# Note: this does not work for all lock types
+$path = "C:\path\to\locked\file.txt"
+Get-Process | Where-Object {
+    try {
+        $_.Modules | Where-Object { $_.FileName -eq $path }
+    } catch { $false }
+}
+```
+
+### Method 4 -- Unlocker or LockHunter (third party)
+
+Free tools that integrate with Explorer context menu and show which process holds any lock.
+
+---
+
+## Common fixes
+
+### Fix 1 -- Close the locking application
+
+The cleanest fix. Find the process via Resource Monitor or handle.exe, close it or terminate the handle.
+
+### Fix 2 -- Restart in a clean state
+
+For npm/build tool issues, restarting VS Code or closing all terminals often releases hidden handles.
+
+### Fix 3 -- Exclude build directories from AV scanning
+
+```powershell
+# Exclude project directory from Windows Defender
+Add-MpPreference -ExclusionPath "C:\Users\logan\projects"
+
+# Or exclude by process
+Add-MpPreference -ExclusionProcess "node.exe"
+Add-MpPreference -ExclusionProcess "msbuild.exe"
+```
+
+This is one of the most impactful changes for Windows developer performance. AV scanning of build output is a major cause of intermittent lock failures.
+
+### Fix 4 -- Retry logic in tooling
+
+For tools you control, implement retry with backoff on file operations:
+
+```typescript
+async function writeWithRetry(
+  path: string,
+  content: string,
+  retries = 3,
+  delayMs = 100
+): Promise<void> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await fs.writeFile(path, content);
+      return;
+    } catch (err) {
+      if (err.code === "EBUSY" || err.code === "EPERM") {
+        if (i < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs * (i + 1)));
+          continue;
+        }
+      }
+      throw err;
+    }
+  }
+}
+```
+
+This is important for Claude Code's file write tools -- a transient lock from AV scanning should not fail the entire operation.
+
+---
+
+## File locking and Claude Code
+
+When Claude Code writes a file edit, it opens the file, writes the content, and closes it. If AV software locks the file during the write, the operation fails. If Claude Code is editing a file that VS Code has open with an exclusive lock, the write fails.
+
+The error code matters:
+- `EBUSY` -- file is locked by another process
+- `EPERM` -- permission denied, may be a lock or an actual permissions issue
+- `EACCES` -- access denied, similar to EPERM
+
+A well-implemented file write tool distinguishes between these and gives the user actionable guidance rather than a raw error code.
+
+---
 
 ## Quick Lab
 
-### In CMD
+### Step 1 -- Create a locked file and observe the error
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+```powershell
+# Open a file handle in PowerShell (simulates a lock)
+$stream = [System.IO.File]::Open(
+    "$env:TEMP\test-lock.txt",
+    [System.IO.FileMode]::OpenOrCreate,
+    [System.IO.FileAccess]::ReadWrite,
+    [System.IO.FileShare]::None   # exclusive lock
+)
 
-### In PowerShell
+# Try to delete it in another PowerShell window
+Remove-Item "$env:TEMP\test-lock.txt"
+# Should fail with "being used by another process"
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+# Release the lock
+$stream.Close()
+$stream.Dispose()
+
+# Now delete works
+Remove-Item "$env:TEMP\test-lock.txt"
+```
+
+### Step 2 -- Check for AV exclusions
+
+```powershell
+# See current Windows Defender exclusions
+Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess
+```
+
+### Step 3 -- Find locked files in a build directory
+
+```powershell
+# If you have handle.exe from Sysinternals:
+# handle.exe node_modules
+
+# Without extra tools, check for npm lock files:
+Get-ChildItem node_modules -Filter "*.lock" -Recurse -ErrorAction SilentlyContinue
+```
+
+---
 
 ## What to Notice
 
-- What differs between environments
-- What debugging clues appear
-- What engineers typically misunderstand
+- The error message "file is being used by another process" is accurate but unhelpful -- it does not say which process
+- AV exclusions for build directories are not a security risk -- build output is not a meaningful attack surface
+- Retry logic with backoff is the right engineering solution for transient locks from AV scanning
+- `FILE_SHARE_NONE` (exclusive lock) is the default for many Windows API calls -- Unix developers often assume files can always be replaced
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing  
-• why the behavior differs  
-• how you would debug it in a real environment
+- Why Windows file locking differs fundamentally from Unix
+- The most common sources of file locks in a developer environment
+- How to diagnose which process holds a lock
+- How to design a tool that handles transient lock failures gracefully
 
-<Quiz
-  question="Why are locked files a common Windows troubleshooting issue?"
-  options={[
-    "Because Windows never allows files to be reopened",
-    "Because active processes or handles can prevent updates, deletion, or replacement",
-    "Because only Linux locks files",
-    "Because locked files only affect text editors"
+Strong answer:
+
+"Windows mandatory locking means a file cannot be deleted or replaced while any process holds an open handle to it. The three most common culprits I see are antivirus scanning build output, the Windows Search indexer watching project directories, and editors holding file watchers. I diagnose with Resource Monitor or handle.exe from Sysinternals -- they show exactly which process holds the lock. For tools I build, I add retry logic with exponential backoff on EBUSY and EPERM errors, because AV-induced locks are transient and a single retry usually succeeds."
+
+---
+
+<QuizSet
+  title="Locked Files Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "Why can you delete an open file on Linux but not on Windows?",
+      options: [
+        "Linux does not have file permissions",
+        "Windows uses mandatory locking by default -- open files cannot be deleted until all handles are closed",
+        "Linux files are smaller",
+        "Windows files are always read-only"
+      ],
+      answer: "Windows uses mandatory locking by default -- open files cannot be deleted until all handles are closed",
+      explanation: "Linux uses advisory locking -- processes can unlink a file while it is still open. Windows uses mandatory locking -- the file system enforces that open files cannot be deleted or replaced. This is a fundamental OS design difference."
+    },
+    {
+      question: "What is the most common hidden cause of intermittent build failures on Windows?",
+      options: [
+        "The compiler has bugs",
+        "Antivirus software locking build output files briefly while scanning them",
+        "Windows Update running during the build",
+        "Node.js incompatibility"
+      ],
+      answer: "Antivirus software locking build output files briefly while scanning them",
+      explanation: "Windows Defender and other AV tools scan files as they are written. During rapid builds that create many files, AV can briefly lock output files causing EBUSY or EPERM errors. Excluding build directories from AV scanning is one of the most impactful developer experience improvements on Windows."
+    },
+    {
+      question: "What is the correct error-handling approach for file write operations in a CLI tool on Windows?",
+      options: [
+        "Fail immediately on any error",
+        "Ignore all errors silently",
+        "Retry with backoff on EBUSY and EPERM errors since these are often transient locks from AV scanning",
+        "Ask the user to reboot"
+      ],
+      answer: "Retry with backoff on EBUSY and EPERM errors since these are often transient locks from AV scanning",
+      explanation: "EBUSY and EPERM from file operations are frequently caused by transient AV locks that last only milliseconds. A retry with a short delay succeeds in most cases. Failing immediately gives users a confusing error for a problem that resolves itself."
+    }
   ]}
-  answer="Because active processes or handles can prevent updates, deletion, or replacement"
-  explanation="Windows file locking can block builds, cleanup, upgrades, and service updates when a file is still being used by another process."
 />

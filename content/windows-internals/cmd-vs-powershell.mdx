@@ -1,62 +1,333 @@
-# CMD vs PowerShell
+# CMD vs PowerShell: What Every Windows Engineer Must Know
 
 ## Why this matters
 
-A CLI tool can behave differently depending on which shell launches it. Understanding the differences between CMD and PowerShell helps you diagnose issues with quoting, environment variables, command discovery, and script behavior.
+A CLI tool that works perfectly in one Windows shell can fail silently or produce wrong output in another. Understanding the real differences between CMD and PowerShell -- not just "PowerShell is newer" -- is what lets you diagnose these failures and build tools that work reliably in both.
+
+This is not academic. Claude Code spawns subprocesses on Windows and needs to know which shell those subprocesses run in. The shell determines argument quoting, environment variable syntax, command availability, and output format.
+
+---
 
 ## Key Concepts
 
-- CMD is primarily string-oriented
-- PowerShell is object-oriented
-- Environment variable syntax differs
-- Quoting and escaping rules differ
-- Error handling and command discovery behave differently
+- CMD is a legacy string-based shell; PowerShell is an object-oriented scripting platform
+- Environment variable syntax differs: `%VAR%` in CMD, `$env:VAR` in PowerShell
+- Quoting rules differ significantly and affect how arguments reach child processes
+- PowerShell has two major versions: Windows PowerShell (5.x, built-in) and PowerShell 7+ (cross-platform, separate install)
+- Node.js uses CMD as the default shell on Windows when `shell: true` -- not PowerShell
 
-## Quick Summary
+---
 
-CMD treats command output as plain text. PowerShell treats command output as structured objects. Because of this difference, commands, scripts, and CLI tools may behave differently depending on which shell executes them.
+## The fundamental difference: strings vs objects
+
+**CMD** treats everything as text. The output of `dir` is a string. Piping between commands passes raw text.
+
+**PowerShell** treats everything as objects. The output of `Get-ChildItem` is a collection of `FileSystemInfo` objects. Piping passes those objects, not their text representations.
+
+```powershell
+# CMD: output is raw text, you parse it manually
+dir | findstr ".ts"
+
+# PowerShell: output is objects, you filter by properties
+Get-ChildItem | Where-Object { $_.Extension -eq ".ts" }
+Get-ChildItem *.ts  # simpler version
+
+# The difference matters for parsing in scripts
+# CMD output depends on locale, formatting, column widths
+# PowerShell output is structured and consistent
+```
+
+---
+
+## Environment variable syntax
+
+This is the most common source of confusion when copying commands between shells:
+
+```batch
+:: CMD
+echo %USERNAME%
+echo %PATH%
+set MY_VAR=hello
+echo %MY_VAR%
+```
+
+```powershell
+# PowerShell
+echo $env:USERNAME
+echo $env:PATH
+$env:MY_VAR = "hello"
+echo $env:MY_VAR
+
+# PowerShell also supports cmd-style in some contexts but it's unreliable
+# Always use $env: in PowerShell scripts
+```
+
+**In Node.js subprocesses:**
+```javascript
+// When you spawn a subprocess with shell: true on Windows
+// Node uses cmd.exe, so environment variable expansion uses %VAR% syntax
+const { exec } = require("child_process");
+exec("echo %USERNAME%", (err, stdout) => console.log(stdout));  // works
+exec("echo $env:USERNAME", (err, stdout) => console.log(stdout));  // does not work
+```
+
+---
+
+## Quoting differences -- the real pain point
+
+Quoting is where most Windows shell bugs live.
+
+**CMD quoting:**
+```batch
+:: Double quotes are the only quote character
+dir "C:\Program Files"
+
+:: Single quotes are literal characters in CMD
+dir 'C:\Program Files'   :: ERROR -- 'C:\Program' is not a valid path
+
+:: Passing arguments with spaces to programs
+node index.js "hello world"  :: argv: ['hello world']
+node index.js 'hello world'  :: argv: ["'hello", "world'"]  -- broken
+```
+
+**PowerShell quoting:**
+```powershell
+# Both single and double quotes work for strings
+"hello world"   # double quotes -- variable expansion happens
+'hello world'   # single quotes -- literal, no expansion
+
+$name = "Logan"
+"Hello $name"   # outputs: Hello Logan
+'Hello $name'   # outputs: Hello $name  (literal)
+
+# Passing arguments to external programs
+node index.js "hello world"   # argv: ['hello world']
+node index.js 'hello world'   # argv: ['hello world']  -- both work for args
+```
+
+**The PowerShell argument escaping problem:**
+
+PowerShell has its own argument parsing that runs before passing arguments to external programs. This creates double-parsing:
+
+```powershell
+# This breaks in PowerShell when the argument contains special chars
+node index.js --filter "*.ts"
+# PowerShell may expand *.ts as a glob before node sees it
+
+# Safe approach -- use --% to stop PowerShell parsing
+node index.js --% --filter "*.ts"
+
+# Or escape specially
+node index.js --filter `"*.ts`"
+```
+
+---
+
+## Command availability differences
+
+Some commands exist in CMD but not PowerShell, and vice versa:
+
+| CMD | PowerShell equivalent |
+|---|---|
+| `dir` | `Get-ChildItem` (or `dir` via alias) |
+| `copy` | `Copy-Item` (or `cp` via alias) |
+| `del` | `Remove-Item` (or `rm` via alias) |
+| `type file.txt` | `Get-Content file.txt` (or `cat` via alias) |
+| `findstr` | `Select-String` |
+| `where` | `Get-Command` (or `where.exe` for the binary) |
+
+PowerShell has aliases for many CMD commands (`dir`, `cd`, `copy`, `del`, `cat`) but they are not identical. For example, PowerShell's `dir` returns objects, not text -- so piping `dir | findstr ".ts"` does not work the same way.
+
+**External programs available in both:**
+Commands like `git`, `node`, `npm` are external executables that work in both shells (as long as they are on PATH).
+
+---
+
+## Windows PowerShell vs PowerShell 7
+
+There are two separate PowerShell products:
+
+**Windows PowerShell (5.1)**
+- Built into Windows -- always available
+- Located at `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+- `.NET Framework` based
+- Will not receive new features (maintenance only)
+
+**PowerShell 7+ (pwsh)**
+- Must be installed separately
+- Located at `C:\Program Files\PowerShell\7\pwsh.exe`
+- `.NET` (cross-platform) based
+- Actively developed, new features
+- Slightly different behavior in some areas
+
+```powershell
+# Check which version you are running
+$PSVersionTable.PSVersion
+
+# Check if pwsh is installed
+Get-Command pwsh -ErrorAction SilentlyContinue
+```
+
+For a Windows platform engineer, this matters because:
+- Some users have only Windows PowerShell 5.1
+- Some scripts only work on PowerShell 7+
+- Claude Code's PowerShell integration must work on both
+
+---
+
+## How Node.js chooses a shell on Windows
+
+When you use `shell: true` in Node's `child_process`, Node defaults to:
+
+```javascript
+// Node.js source (simplified):
+const shell = process.platform === "win32" 
+  ? process.env.ComSpec || "cmd.exe"   // <-- uses CMD, not PowerShell
+  : "/bin/sh";
+```
+
+This means if you spawn a subprocess with `shell: true` on Windows and write PowerShell syntax, it will fail because cmd.exe is running it.
+
+```javascript
+const { exec } = require("child_process");
+
+// WRONG -- PowerShell syntax but CMD shell
+exec("Get-ChildItem *.ts", (err, stdout) => {
+  // 'Get-ChildItem' is not recognized as an internal or external command
+});
+
+// CORRECT -- CMD syntax for the default shell
+exec("dir *.ts", (err, stdout) => { ... });
+
+// CORRECT -- explicitly use PowerShell
+exec("Get-ChildItem *.ts", { shell: "powershell.exe" }, (err, stdout) => { ... });
+
+// CORRECT -- avoid shell entirely for simple commands
+const { spawn } = require("child_process");
+spawn("git", ["status"], { shell: false });  // no shell, no quoting issues
+```
+
+---
+
+## Execution policy (PowerShell only)
+
+CMD has no concept of execution policy. PowerShell does:
+
+```powershell
+# Check current policy
+Get-ExecutionPolicy
+
+# Common values:
+# Restricted    -- no scripts at all (Windows default for some versions)
+# RemoteSigned  -- local scripts ok, downloaded scripts need signing
+# Unrestricted  -- all scripts run (not recommended)
+
+# This is why Claude Code's .ps1 wrapper may fail for some users:
+# If ExecutionPolicy is Restricted, the wrapper does not run
+Get-ExecutionPolicy -List  # see policy per scope
+```
+
+---
 
 ## Quick Lab
 
-### In CMD, run:
+### Step 1 -- Run the same commands in both shells
 
-<pre>
-  <code>
-{`echo %USERNAME%
-echo %PATH%
-dir`}
-  </code>
-</pre>
+Open CMD and PowerShell side by side, then run:
 
-### In PowerShell, run:
+```
+echo %USERNAME%        (CMD)
+echo $env:USERNAME     (PowerShell)
 
-<pre>
-  <code>
-{`$env:USERNAME
-$env:PATH
-Get-ChildItem`}
-  </code>
-</pre>
+dir *.txt              (CMD -- raw text output)
+Get-ChildItem *.txt    (PowerShell -- object output)
+
+where node             (CMD)
+Get-Command node       (PowerShell)
+```
+
+### Step 2 -- Test quoting differences
+
+```batch
+:: In CMD
+node -e "console.log(process.argv)" arg1 "two words" arg3
+```
+
+```powershell
+# In PowerShell
+node -e "console.log(process.argv)" arg1 "two words" arg3
+# Compare the output -- are the args the same?
+```
+
+### Step 3 -- Check your PowerShell version
+
+```powershell
+$PSVersionTable
+Get-Command pwsh -ErrorAction SilentlyContinue
+```
+
+---
 
 ## What to Notice
 
-- Environment variables use `%VAR%` syntax in CMD and `$env:VAR` in PowerShell
-- CMD commands such as `dir` return plain text
-- PowerShell commands such as `Get-ChildItem` return structured objects
-- PowerShell supports pipelines that operate on objects instead of text
+- Node.js uses CMD by default on Windows, not PowerShell -- PowerShell syntax in `exec()` calls will fail
+- PowerShell's argument parsing layer runs before arguments reach external programs -- this is the source of most quoting surprises
+- Windows PowerShell 5.1 and PowerShell 7 have behavioral differences that affect some scripts
+- The aliases in PowerShell (`dir`, `cat`, `cp`) look like CMD commands but behave differently -- they return objects, not text
+
+---
 
 ## Interview Angle
 
-Be prepared to explain why a CLI tool might behave differently depending on the shell that launches it. Strong answers usually mention environment variable syntax, quoting rules, command lookup behavior, and the object-based pipeline in PowerShell.
+Be ready to explain:
 
-<Quiz
-  question="What is one of the most important differences between CMD and PowerShell?"
-  options={[
-    "CMD uses objects and PowerShell uses plain text",
-    "PowerShell uses objects and CMD is primarily text-oriented",
-    "They use identical variable syntax",
-    "They resolve commands in exactly the same way"
+- The fundamental difference between CMD and PowerShell (strings vs objects)
+- Why `shell: true` in Node.js uses CMD not PowerShell on Windows
+- How quoting behaves differently in each shell
+- The difference between Windows PowerShell 5.1 and PowerShell 7
+
+Strong answer:
+
+"The most important thing to understand about CMD vs PowerShell is that CMD is text-based and PowerShell is object-based. For Node.js subprocesses, this matters because shell: true uses cmd.exe by default on Windows -- so PowerShell syntax in exec() calls fails silently or with confusing errors. Quoting is also different: CMD only understands double quotes for argument grouping, while PowerShell has its own parsing layer that processes arguments before passing them to external programs. And there are two distinct PowerShell products -- Windows PowerShell 5.1 is always present, PowerShell 7 must be installed separately -- which affects whether some features are available."
+
+---
+
+<QuizSet
+  title="CMD vs PowerShell Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "When Node.js uses shell: true on Windows, which shell runs the command by default?",
+      options: [
+        "PowerShell 7",
+        "Windows PowerShell 5.1",
+        "cmd.exe",
+        "bash"
+      ],
+      answer: "cmd.exe",
+      explanation: "Node.js uses process.env.ComSpec (which defaults to cmd.exe) as the shell on Windows when shell: true is specified. This means PowerShell syntax in exec() calls will fail with &apos;not recognized as a command&apos;."
+    },
+    {
+      question: "What happens when you use single quotes for a file path in CMD?",
+      options: [
+        "It works identically to double quotes",
+        "Single quotes are treated as literal characters -- the path includes the quote marks",
+        "CMD ignores single quotes",
+        "Single quotes only work in PowerShell"
+      ],
+      answer: "Single quotes are treated as literal characters -- the path includes the quote marks",
+      explanation: "CMD only recognizes double quotes as string delimiters. Single quotes are just characters. So dir &apos;C:\\Program Files&apos; in CMD looks for a file or directory literally named &apos;C:\\Program which does not exist."
+    },
+    {
+      question: "What is the key architectural difference between Windows PowerShell 5.1 and PowerShell 7?",
+      options: [
+        "PowerShell 7 only runs on Linux",
+        "PowerShell 5.1 uses .NET Framework and is built-in; PowerShell 7 uses cross-platform .NET and must be installed separately",
+        "PowerShell 7 does not support scripts",
+        "They are identical"
+      ],
+      answer: "PowerShell 5.1 uses .NET Framework and is built-in; PowerShell 7 uses cross-platform .NET and must be installed separately",
+      explanation: "Windows PowerShell 5.1 is built into Windows and runs on .NET Framework. PowerShell 7+ (pwsh) runs on the cross-platform .NET runtime, must be installed separately, and is actively developed. A Windows platform engineer must ensure tools work on both since not all users have PowerShell 7 installed."
+    }
   ]}
-  answer="PowerShell uses objects and CMD is primarily text-oriented"
-  explanation="CMD is mostly string and text based, while PowerShell works heavily with structured objects. That difference affects commands, pipelines, and scripting behavior."
 />

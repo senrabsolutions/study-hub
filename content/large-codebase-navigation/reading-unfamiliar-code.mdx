@@ -1,60 +1,302 @@
-# Lesson Title
+# Reading Unfamiliar Code
 
 ## Why this matters
 
-Explain why this concept matters in real engineering work. Focus on debugging, real-world CLI behavior, or system interactions.
+Joining a team that works on Claude Code means contributing to a large, active TypeScript codebase you did not write. The ability to navigate, understand, and safely modify an unfamiliar codebase is one of the most valuable skills an engineer can have -- and one of the hardest to teach from a textbook.
+
+This lesson is about the systematic approach that actually works in practice.
+
+---
 
 ## Key Concepts
 
-- Concept one
-- Concept two
-- Concept three
-- Concept four
+- Start from the outside in -- understand what the system does before how it does it
+- The entry point is your anchor -- everything flows from there
+- Reading tests is often faster than reading implementation code
+- You do not need to understand everything -- you need to understand enough to make a safe change
+- Git history is documentation that cannot go stale
 
-## Quick Summary
+---
 
-Summarize the core idea in plain language so it can be quickly reviewed during interview prep.
+## The orientation sequence
+
+When you first land on an unfamiliar codebase, resist the urge to start reading files randomly. There is a sequence that consistently works:
+
+### 1. Read the README and package.json first
+
+```bash
+cat README.md
+cat package.json
+```
+
+`package.json` tells you:
+- What the project is called and what it does
+- What scripts exist (`dev`, `build`, `test`, `lint`)
+- What dependencies it has -- which tells you what frameworks and patterns to expect
+- The entry point (often `main` field or inferred from `bin`)
+
+### 2. Find the entry point
+
+```bash
+# Check package.json bin field
+cat package.json | grep -A 5 '"bin"'
+cat package.json | grep '"main"'
+
+# Common entry points
+ls src/index.ts
+ls src/main.ts
+ls app/index.ts
+```
+
+The entry point is where execution begins. Everything else is called from here, directly or indirectly.
+
+### 3. Read the entry point shallowly
+
+Do not try to understand every import on first read. Scan for:
+- What gets initialized
+- What the main execution path is
+- What the major subsystems are (their names tell you a lot)
+
+```typescript
+// You don't need to understand this deeply yet
+// You need to understand: what are the major pieces?
+import { createCLI } from "./cli";
+import { initConfig } from "./config";
+import { startSession } from "./session";
+
+async function main() {
+  const config = await initConfig();
+  const cli = createCLI(config);
+  await startSession(cli);
+}
+```
+
+From this alone you know: there is a CLI layer, a config system, and a session concept. Those are the three areas to understand.
+
+---
+
+## Reading tests to understand intent
+
+Tests often explain *why* code exists more clearly than the code itself. Before reading an implementation, read its tests:
+
+```bash
+# Find tests for a specific module
+find . -name "*.test.ts" | grep -i session
+find . -name "*.spec.ts" | grep -i config
+
+# Or check the __tests__ directory
+ls __tests__/
+```
+
+A test like this tells you more than 100 lines of implementation:
+
+```typescript
+it("should preserve PATH when spawning subprocesses on Windows", () => {
+  // This test tells you:
+  // 1. There is subprocess spawning code
+  // 2. PATH handling on Windows was a specific concern
+  // 3. There was a bug here at some point (or a risk someone anticipated)
+});
+```
+
+---
+
+## Using git history as documentation
+
+```bash
+# See recent changes to a file
+git log --oneline src/tools/file-write.ts
+
+# See what changed in a specific commit
+git show abc1234
+
+# See who changed a specific line and why
+git blame src/tools/file-write.ts
+
+# Search commit messages for context
+git log --oneline --grep="Windows" --grep="PATH" --all-match
+git log --oneline --grep="CRLF"
+git log --oneline --grep="permission"
+```
+
+A commit message like `"Fix: CRLF in terminal output garbling ANSI colors on Windows"` tells you there was a specific bug, what caused it, and where the fix lives -- faster than reading the code itself.
+
+---
+
+## Tracing a specific behavior
+
+When you need to change something specific, trace that behavior rather than reading everything:
+
+**Example: How does Claude Code write a file?**
+
+```bash
+# Search for the file write tool
+grep -r "write_file\|writeFile\|WriteFile" src/ --include="*.ts" -l
+
+# Find where tools are registered
+grep -r "tools\|toolName\|tool_use" src/ --include="*.ts" | grep -i "register\|define\|create" | head -20
+
+# Find the actual implementation
+grep -rn "name.*write" src/ --include="*.ts" | grep -i "tool"
+```
+
+This is faster than reading the entire codebase. You are following a thread rather than mapping the whole system.
+
+---
+
+## Understanding the data flow
+
+For a CLI tool, the data flow is almost always:
+
+```
+User input (argv, stdin)
+  -> Argument parsing
+  -> Configuration loading
+  -> Business logic / command execution
+  -> Output (stdout, stderr, files)
+```
+
+Once you identify these stages, you can read each one independently. A bug in argument parsing does not require understanding the business logic.
+
+---
+
+## Safe modification strategies
+
+When you need to change something in an unfamiliar codebase:
+
+**Make the smallest possible change.** If you need to fix path handling, change only the path handling code. Do not refactor adjacent code.
+
+**Add a test before changing.** Write a failing test that describes what you want, then make it pass. This documents your intent and prevents regression.
+
+**Use the existing patterns.** Look at how similar things are done elsewhere in the codebase and follow the same pattern. This reduces the risk of introducing inconsistencies.
+
+**Check for similar changes in git history.** If someone fixed a PATH bug before, their approach is probably the right one for this codebase.
+
+---
+
+## Tools for navigating large codebases
+
+```bash
+# Find all references to a function or symbol
+grep -rn "getTrackManifest" src/ --include="*.ts"
+
+# Find where a type is defined
+grep -rn "type TrackKey\|interface TrackKey" . --include="*.ts"
+
+# Find files that import from a specific module
+grep -rn "from.*lib/content" src/ --include="*.ts"
+
+# See the call stack for a function (static analysis)
+# VS Code: right-click -> "Find All References"
+# or: right-click -> "Go to Definition"
+```
+
+In VS Code specifically, these shortcuts are faster than grep for TypeScript:
+- `F12` -- Go to Definition
+- `Shift+F12` -- Find All References
+- `Ctrl+Shift+F` -- Search across all files
+- `Ctrl+P` -- Quick file open (type partial filename)
+
+---
 
 ## Quick Lab
 
-### In CMD
+Do these exercises against the Study Hub codebase itself:
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+### Step 1 -- Orient from package.json
 
-### In PowerShell
+```powershell
+cat package.json
+# What scripts are available?
+# What are the main dependencies?
+# What does the bin field say (if any)?
+```
 
-<pre>
-  <code>
-{`command here`}
-  </code>
-</pre>
+### Step 2 -- Find the entry point
+
+```powershell
+# Where does the app start?
+cat app/page.tsx   # Next.js home page
+cat app/layout.tsx # Root layout
+```
+
+### Step 3 -- Trace a specific feature
+
+```powershell
+# How does the quiz scoring work?
+# Start from the Quiz component and follow the data
+grep -rn "quizPassed\|markQuizPassed" . --include="*.ts" --include="*.tsx"
+```
+
+### Step 4 -- Use git history
+
+```powershell
+# What changed most recently in the components?
+git log --oneline -- components/
+```
+
+---
 
 ## What to Notice
 
-- What differs between environments
-- What debugging clues appear
-- What engineers typically misunderstand
+- You never need to read a codebase cover-to-cover -- you need to read the parts relevant to your task
+- Tests and commit messages are often faster to read than implementation code
+- Following a thread (a specific feature or data flow) is faster than a breadth-first read
+- The names of things (files, functions, types) tell you a lot before you read a single line of code
+
+---
 
 ## Interview Angle
 
 Be ready to explain:
 
-• what the system is doing  
-• why the behavior differs  
-• how you would debug it in a real environment
+- Your systematic approach to orienting in an unfamiliar codebase
+- How you would find the relevant code for a specific bug fix
+- How you use tests and git history as navigation tools
+- How you make safe changes without full context
 
-<Quiz
-  question="What is a strong first step when approaching an unfamiliar codebase?"
-  options={[
-    "Rewrite the largest file",
-    "Find the entry point and trace execution from there",
-    "Ignore the build and run system",
-    "Memorize every file before testing anything"
+Strong answer:
+
+"I start from the outside in -- README and package.json to understand what the system is, then the entry point to identify the major subsystems, then the tests for the area I care about. Tests explain intent better than implementation. For a specific change, I trace that specific behavior using grep and VS Code's Find All References rather than reading everything. Before changing anything, I look at git history for similar changes -- if someone fixed a Windows PATH bug before, their approach is probably the right pattern for that codebase. Then I make the smallest change that fixes the problem and add a test that would have caught the original bug."
+
+---
+
+<QuizSet
+  title="Reading Unfamiliar Code Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "What is the most efficient first step when orienting in a large unfamiliar codebase?",
+      options: [
+        "Start reading the largest files",
+        "Read package.json and README to understand what the system is and what scripts exist",
+        "Run the tests and see what fails",
+        "Ask a colleague to explain every file"
+      ],
+      answer: "Read package.json and README to understand what the system is and what scripts exist",
+      explanation: "package.json tells you the project name, entry points, scripts, and dependencies -- which reveals the frameworks and patterns used. This orients you before reading any implementation code."
+    },
+    {
+      question: "Why are tests often more useful than implementation code when learning a new codebase?",
+      options: [
+        "Tests are always shorter",
+        "Tests explain the intent and expected behavior -- they document what the code is supposed to do and often why",
+        "Tests are always correct",
+        "Implementation code is usually encrypted"
+      ],
+      answer: "Tests explain the intent and expected behavior -- they document what the code is supposed to do and often why",
+      explanation: "A test named &apos;should preserve PATH when spawning subprocesses on Windows&apos; tells you there was a Windows PATH concern, what the expected behavior is, and where to look. This context is faster to get from tests than from reading the implementation."
+    },
+    {
+      question: "What is the safest approach when making a change to an unfamiliar codebase?",
+      options: [
+        "Refactor the surrounding code to make it cleaner while fixing the bug",
+        "Make the smallest possible change, follow existing patterns, and add a test that would have caught the original bug",
+        "Rewrite the affected module from scratch",
+        "Only change code you fully understand"
+      ],
+      answer: "Make the smallest possible change, follow existing patterns, and add a test that would have caught the original bug",
+      explanation: "The smallest change minimizes the risk of introducing new bugs. Following existing patterns reduces inconsistency. Adding a test prevents regression. This approach works even without full understanding of the codebase."
+    }
   ]}
-  answer="Find the entry point and trace execution from there"
-  explanation="The fastest way to orient yourself is to identify where execution starts and then trace the parts relevant to the behavior you care about."
 />

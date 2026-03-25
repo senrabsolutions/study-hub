@@ -1,50 +1,304 @@
-# File Path Differences
+# File Path Differences Across Platforms
 
 ## Why this matters
 
-Cross-platform CLI tools often fail on path handling before anything else. Windows, Linux, and macOS all have different expectations around separators, casing, and path behavior.
+Path handling is one of the most common sources of cross-platform bugs in CLI tools. Code that works perfectly on macOS fails on Windows because of a hardcoded `/`, a missing drive letter, or a case-sensitivity assumption. Understanding exactly how paths work on each platform -- and how to write path-handling code that works everywhere -- is essential for building Windows-reliable tooling.
+
+---
 
 ## Key Concepts
 
-- Backslashes vs forward slashes
-- Relative vs absolute paths
-- Case sensitivity differences
-- Home directory assumptions
+- Windows uses backslashes (`\`) as separators; Unix uses forward slashes (`/`)
+- Windows paths have drive letters (`C:\`); Unix has a single root (`/`)
+- Windows is case-insensitive by default; Linux is case-sensitive; macOS is case-insensitive but case-preserving
+- Windows has both absolute and UNC paths; Unix only has absolute paths starting with `/`
+- Node.js's `path` module handles platform differences -- but only if you use it correctly
 
-## Quick Summary
+---
 
-Path handling is one of the biggest sources of cross-platform bugs. Reliable tooling avoids hardcoded assumptions and uses platform-aware path utilities.
+## The separator problem
+
+```
+Windows: C:\Users\logan\project\src\index.ts
+Unix:    /Users/logan/project/src/index.ts
+```
+
+Windows accepts forward slashes in most contexts (the Win32 API normalizes them) but many tools and some APIs do not. PowerShell uses backslashes for display. Batch files require backslashes. Some npm packages construct paths with hardcoded `/` and fail on Windows.
+
+```javascript
+// WRONG -- hardcoded separator
+const configPath = __dirname + "/config/settings.json";
+
+// CORRECT -- use path.join
+const path = require("path");
+const configPath = path.join(__dirname, "config", "settings.json");
+// On Windows: C:\project\config\settings.json
+// On Unix:    /project/config/settings.json
+```
+
+---
+
+## Drive letters
+
+Windows paths begin with a drive letter and colon:
+
+```
+C:\Users\logan\       -- C drive, standard
+D:\projects\          -- D drive, second drive
+\\server\share\       -- UNC path, network share
+```
+
+There is no concept of a "current drive" on Unix. On Windows, each drive has its own current directory, and changing drives without specifying `cd` keeps you in the same directory on that drive.
+
+```batch
+:: Windows CMD behavior
+C:\Users\logan> D:
+D:\>              :: switched to D drive, kept last location on D
+
+:: cd to a different drive requires /d flag
+C:\Users\logan> cd /d D:\projects
+D:\projects>
+```
+
+This breaks scripts that assume `cd path` always works:
+
+```powershell
+# This might not behave as expected if path is on a different drive
+Set-Location "D:\projects\myapp"
+```
+
+---
+
+## Case sensitivity
+
+| Platform | Behavior |
+|---|---|
+| Windows | Case-insensitive -- `FILE.TXT` and `file.txt` are the same file |
+| Linux | Case-sensitive -- `FILE.TXT` and `file.txt` are different files |
+| macOS | Case-insensitive by default, case-preserving -- like Windows |
+
+This creates a specific class of bug: code that works on Windows and macOS but fails in Linux CI:
+
+```javascript
+// Developer on macOS creates:
+import { MyComponent } from "./components/mycomponent";
+// File on disk: components/MyComponent.tsx
+
+// Works on macOS (case-insensitive)
+// Works on Windows (case-insensitive)
+// FAILS on Linux CI (case-sensitive) -- "mycomponent" != "MyComponent"
+```
+
+This is one of the most common CI failures for teams developing on Mac/Windows.
+
+---
+
+## The Node.js path module
+
+Node.js provides a `path` module that handles platform differences correctly:
+
+```javascript
+const path = require("path");
+
+// Join segments correctly for the current platform
+path.join("src", "components", "Button.tsx");
+// Windows: src\components\Button.tsx
+// Unix:    src/components/Button.tsx
+
+// Resolve to absolute path
+path.resolve("./src/index.ts");
+// Windows: C:\project\src\index.ts
+// Unix:    /project/src/index.ts
+
+// Get directory name
+path.dirname("/Users/logan/project/src/index.ts");
+// Returns: /Users/logan/project/src
+
+// Get file extension
+path.extname("index.ts");
+// Returns: .ts
+
+// Normalize (resolve . and ..)
+path.normalize("src/../lib/./utils.ts");
+// Returns: lib/utils.ts (both platforms)
+```
+
+### path.sep and path.delimiter
+
+```javascript
+// The separator for this platform
+path.sep;
+// Windows: \
+// Unix:    /
+
+// The delimiter between PATH entries
+path.delimiter;
+// Windows: ;
+// Unix:    :
+```
+
+---
+
+## Converting between path formats
+
+Sometimes you need to convert between formats explicitly:
+
+```javascript
+// Convert backslashes to forward slashes (for URLs, POSIX tools)
+const toForwardSlash = (p) => p.replace(/\\/g, "/");
+
+// Normalize Windows path for use in a URL
+const filePath = "C:\\Users\\logan\\project\\file.ts";
+const urlPath = toForwardSlash(filePath); // C:/Users/logan/project/file.ts
+
+// Convert a POSIX-style path to Windows
+const { resolve } = require("path").win32;
+```
+
+---
+
+## The MINGW/Git Bash path problem
+
+Git Bash on Windows runs in a MINGW environment that translates POSIX paths:
+
+```bash
+# In Git Bash
+/c/Users/logan/project    # Git Bash's representation of C:\Users\logan\project
+```
+
+When a tool running in Git Bash passes a path to a Windows-native process, the path may be in POSIX format which the Windows process does not understand:
+
+```bash
+# This can fail if node.exe doesn't understand /c/Users/...
+node /c/Users/logan/project/index.js
+
+# Use the Windows path form instead
+node "C:/Users/logan/project/index.js"
+```
+
+This is one of the path bugs that Claude Code needed to handle -- paths generated in a Git Bash context look different from paths generated in PowerShell or CMD.
+
+---
+
+## Special paths
+
+```powershell
+# User home directory
+$env:USERPROFILE          # Windows: C:\Users\logan
+$HOME                     # PowerShell 6+, also works
+
+# Temp directory
+$env:TEMP                 # Windows: C:\Users\logan\AppData\Local\Temp
+[System.IO.Path]::GetTempPath()   # More reliable
+
+# AppData locations
+$env:APPDATA              # C:\Users\logan\AppData\Roaming  (roaming)
+$env:LOCALAPPDATA         # C:\Users\logan\AppData\Local    (local)
+```
+
+On Unix:
+```bash
+$HOME                     # /Users/logan (macOS) or /home/logan (Linux)
+$TMPDIR                   # /var/folders/... (macOS) or /tmp (Linux)
+~/.config                 # standard config location
+```
+
+---
 
 ## Quick Lab
 
-### Compare Examples
+### Step 1 -- Compare path behavior
 
-<pre>
-  <code>
-{`Windows: C:\\Tools\\myapp\\config.json
-Linux:   /usr/local/bin/myapp
-macOS:   /Users/example/.config/myapp`}
-  </code>
-</pre>
+```powershell
+# In PowerShell
+$path = "src\components\Button.tsx"
+Write-Host $path
+
+# Node path behavior
+node -e "const p=require('path'); console.log(p.join('src','components','Button.tsx'))"
+node -e "const p=require('path'); console.log(p.sep)"
+```
+
+### Step 2 -- Test case sensitivity
+
+```powershell
+# Create a file
+New-Item "TestFile.txt" -ItemType File
+# Try to open with wrong case
+Get-Content "testfile.txt"   # Works on Windows
+Get-Content "TESTFILE.TXT"   # Also works on Windows
+```
+
+### Step 3 -- Inspect path construction in a project
+
+```powershell
+# Find hardcoded path separators in TypeScript files
+Select-String -Path "src\**\*.ts" -Pattern '["'']/' -Recurse
+# These might be path bugs
+```
+
+---
 
 ## What to Notice
 
-- Windows paths often include drive letters
-- Separator expectations differ
-- Case sensitivity may differ between platforms
+- `path.join()` is always safer than string concatenation for paths
+- Case sensitivity bugs only appear in Linux CI -- they are invisible on Mac and Windows development machines
+- Git Bash MINGW path translation is a separate path format that Windows-native processes may not understand
+- `$env:USERPROFILE` is more reliable than `~` in Windows scripts
+
+---
 
 ## Interview Angle
 
-Be ready to explain why path bugs happen when porting tools between Linux and Windows and how you would design around them.
+Be ready to explain:
 
-<Quiz
-  question="Why do file path bugs commonly appear when porting tools from Linux to Windows?"
-  options={[
-    "Because Windows never uses file paths",
-    "Because separators, drive letters, and path assumptions differ by platform",
-    "Because Linux and Windows paths are always interchangeable",
-    "Because Node.js ignores operating system differences"
+- The three main differences between Windows and Unix path formats
+- Why case-sensitivity bugs only appear in CI
+- How Node's `path` module handles platform differences
+- The MINGW path translation issue in Git Bash
+
+Strong answer:
+
+"Path handling has three main cross-platform failure modes. First, separator differences -- using string concatenation with hardcoded slashes instead of path.join. Second, case-sensitivity -- code that imports MyComponent as mycomponent works on Windows and Mac but fails in Linux CI. Third, drive letters -- code that assumes paths start with / breaks on Windows. For Claude Code specifically there is a fourth problem: MINGW path format from Git Bash looks like /c/Users/logan/ which Windows-native processes do not understand. The fix is always path normalization before passing paths to Windows APIs."
+
+---
+
+<QuizSet
+  title="File Path Differences Assessment"
+  passPercentage={67}
+  questions={[
+    {
+      question: "A developer&apos;s TypeScript project works on their Mac and Windows machine but fails in Linux CI with &apos;module not found&apos;. What is the most likely cause?",
+      options: [
+        "The CI server has the wrong Node version",
+        "An import uses incorrect case -- Linux is case-sensitive unlike Mac and Windows",
+        "The TypeScript compiler is outdated",
+        "The CI server does not support TypeScript"
+      ],
+      answer: "An import uses incorrect case -- Linux is case-sensitive unlike Mac and Windows",
+      explanation: "macOS and Windows are case-insensitive -- &apos;MyComponent&apos; and &apos;mycomponent&apos; refer to the same file. Linux is case-sensitive, so they are different files. Code with incorrect import casing works locally but fails in Linux CI."
+    },
+    {
+      question: "What is the correct way to construct a file path in Node.js for cross-platform compatibility?",
+      options: [
+        "Use string concatenation with forward slashes: dir + &apos;/&apos; + file",
+        "Use path.join(dir, file) from the path module",
+        "Use backslashes on Windows and forward slashes on Mac",
+        "Hardcode the full absolute path"
+      ],
+      answer: "Use path.join(dir, file) from the path module",
+      explanation: "path.join() uses the correct separator for the current platform automatically. String concatenation with hardcoded separators will fail on the other platform. The path module exists specifically to handle these differences."
+    },
+    {
+      question: "What is the MINGW path issue that affects Git Bash on Windows?",
+      options: [
+        "Git Bash cannot access files on Windows",
+        "Git Bash translates paths to POSIX format (/c/Users/...) which Windows-native processes may not understand",
+        "MINGW only supports ASCII filenames",
+        "Git Bash uses different drive letters"
+      ],
+      answer: "Git Bash translates paths to POSIX format (/c/Users/...) which Windows-native processes may not understand",
+      explanation: "Git Bash runs in a MINGW environment that represents C:\\Users\\logan as /c/Users/logan. When these paths are passed to Windows-native processes (like node.exe or other Windows APIs), they may fail because the native process expects C:\\ format."
+    }
   ]}
-  answer="Because separators, drive letters, and path assumptions differ by platform"
-  explanation="Cross-platform tools often break because they assume one path format or one filesystem behavior. Windows introduces drive letters, different separators, and different path expectations."
 />
