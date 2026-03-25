@@ -1,165 +1,261 @@
-# Windows Registry Basics
+# Windows Registry Basics for CLI Engineers
 
 ## Why this matters
 
-The Windows Registry is a central configuration system used by:
+The Windows Registry is where the OS and applications store persistent configuration. For CLI engineers, it matters in three concrete ways: environment variables (including PATH) live there, tool installation state lives there, and application-level configuration that affects CLI behavior lives there.
 
-- the operating system
-- installed applications
-- CLI tools
-- installers and package managers
-
-If something behaves differently than expected, the answer is often in the registry.
-
-Understanding the registry helps you debug:
-
-- applications reading the wrong configuration
-- tools behaving differently per user vs system-wide
-- install and uninstall issues
-- environment variable inconsistencies
+When a tool installs correctly but does not work, when PATH changes do not stick, when uninstalls leave broken state -- the registry is usually where you look.
 
 ---
 
 ## Key Concepts
 
-- The registry is a **hierarchical key-value store**
-- Top-level sections are called **hives**, including:
-  - `HKEY_LOCAL_MACHINE (HKLM)` → system-wide settings
-  - `HKEY_CURRENT_USER (HKCU)` → user-specific settings
-- Keys are like folders, values are like files
-- Values can store different types (strings, numbers, etc.)
-- Many system settings and environment variables are stored here
+- The registry is a hierarchical key-value database built into Windows
+- Top-level containers are called hives -- HKLM for machine-wide, HKCU for the current user
+- Environment variables for the system and current user are stored in specific registry keys
+- winget, Chocolatey, and MSI installers all read and write the registry
+- Registry changes to environment variables require processes to restart to take effect
 
 ---
 
-## Quick Summary
+## The hive structure
 
-The Windows Registry stores configuration data for both the system and applications. Many behaviors that seem “hardcoded” are actually controlled through registry values.
+```
+HKEY_LOCAL_MACHINE (HKLM)    -- system-wide, applies to all users
+  SOFTWARE\                   -- installed application settings
+  SYSTEM\                     -- OS configuration
+  SYSTEM\CurrentControlSet\Control\Session Manager\Environment\  -- system PATH and env vars
+
+HKEY_CURRENT_USER (HKCU)     -- current user only
+  Environment\                -- user PATH and environment variables
+  SOFTWARE\                   -- user-level application settings
+
+HKEY_CLASSES_ROOT (HKCR)     -- file associations and COM registrations
+HKEY_USERS (HKU)             -- all user profiles (HKCU is a view of current user here)
+HKEY_CURRENT_CONFIG (HKCC)   -- hardware profile for current boot
+```
+
+For daily CLI work, you will almost always be in HKLM or HKCU.
+
+---
+
+## Where environment variables actually live
+
+```powershell
+# User PATH (HKCU)
+Get-ItemProperty "HKCU:\Environment" -Name "Path"
+
+# System PATH (HKLM)
+Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" -Name "Path"
+
+# Read a specific env var from the registry (the authoritative source)
+[Environment]::GetEnvironmentVariable("PATH", "User")    # HKCU
+[Environment]::GetEnvironmentVariable("PATH", "Machine") # HKLM
+
+# Write to user PATH permanently (survives reboot, no admin needed)
+$current = [Environment]::GetEnvironmentVariable("PATH", "User")
+[Environment]::SetEnvironmentVariable("PATH", "$current;C:\my\tool\bin", "User")
+
+# Write to machine PATH permanently (requires admin)
+$current = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+[Environment]::SetEnvironmentVariable("PATH", "$current;C:\my\tool\bin", "Machine")
+```
+
+This is what installers do when they add a tool to PATH -- they write to one of these registry keys. When the installation completes and a new terminal opens, the new terminal reads the updated registry and gets the updated PATH.
+
+---
+
+## Reading the registry from the command line
+
+```powershell
+# Navigate like a filesystem
+Set-Location HKCU:\Environment
+Get-ChildItem
+Get-ItemProperty .
+
+# Read a specific value
+Get-ItemPropertyValue "HKCU:\Environment" -Name "Path"
+
+# Read all values in a key
+Get-Item "HKCU:\Environment" | Select-Object -ExpandProperty Property
+
+# Find all keys containing a search term (useful for debugging installs)
+Get-ChildItem HKLM:\SOFTWARE -Recurse -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -like "*nodejs*" }
+```
+
+```batch
+:: CMD equivalent using reg.exe
+reg query "HKCU\Environment" /v Path
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path
+```
+
+---
+
+## Where installers register software
+
+When you install a program via MSI, winget, or Chocolatey, it writes an uninstall entry to the registry. This is how "Add/Remove Programs" and winget know what is installed:
+
+```powershell
+# See what is installed (32-bit and 64-bit)
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Select-Object DisplayName, DisplayVersion, Publisher |
+  Where-Object { $_.DisplayName } |
+  Sort-Object DisplayName
+
+Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Select-Object DisplayName, DisplayVersion |
+  Where-Object { $_.DisplayName } |
+  Sort-Object DisplayName
+
+# Find a specific tool
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Where-Object { $_.DisplayName -like "*Node*" }
+```
+
+This is useful when diagnosing "is this actually installed" questions -- sometimes winget shows an install succeeded but the uninstall entry is missing, which means something went wrong.
+
+---
+
+## Registry value types
+
+Registry values have types -- understanding them helps when reading raw registry output:
+
+| Type | PowerShell | Description |
+|---|---|---|
+| REG_SZ | String | Plain text -- most common |
+| REG_EXPAND_SZ | ExpandString | Text with env var references like `%SystemRoot%` |
+| REG_DWORD | DWord | 32-bit integer |
+| REG_QWORD | QWord | 64-bit integer |
+| REG_BINARY | Binary | Raw bytes |
+| REG_MULTI_SZ | MultiString | List of strings |
+
+PATH is stored as REG_EXPAND_SZ because it contains `%SystemRoot%` and other expandable references.
+
+---
+
+## Debugging installation problems with the registry
+
+**Symptom: Tool installed but not on PATH**
+
+```powershell
+# 1. Check what the installer actually wrote to PATH
+[Environment]::GetEnvironmentVariable("PATH", "User") -split ";"
+[Environment]::GetEnvironmentVariable("PATH", "Machine") -split ";"
+
+# 2. Check if the tool registered itself as installed
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Where-Object { $_.DisplayName -like "*NodeJS*" -or $_.DisplayName -like "*Node.js*" }
+
+# 3. Check what install location the registry records
+Get-ItemProperty "HKLM:\SOFTWARE\OpenJS Foundation\Node.js" -ErrorAction SilentlyContinue
+```
+
+**Symptom: Tool shows as installed but behaves oddly**
+
+```powershell
+# Find all registry keys related to the tool
+Get-ChildItem HKLM:\SOFTWARE -Recurse -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match "node|nodejs" } |
+  Select-Object Name
+```
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- Open registry editor
+### Step 1 -- Find your PATH in the registry
 
 ```powershell
+# User PATH
+[Environment]::GetEnvironmentVariable("PATH", "User") -split ";"
+
+# System PATH
+[Environment]::GetEnvironmentVariable("PATH", "Machine") -split ";" | Select-Object -First 10
+```
+
+### Step 2 -- See what is installed
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+  Select-Object DisplayName, DisplayVersion |
+  Where-Object { $_.DisplayName } |
+  Sort-Object DisplayName |
+  Select-Object -First 20
+```
+
+### Step 3 -- Open Registry Editor and navigate to PATH
+
+```powershell
+# Open regedit (GUI)
 regedit
-```
 
-### Step 2 -- Navigate to environment variables
-
-Go to:
-
-```
-HKEY_CURRENT_USER\Environment
-```
-
-### Step 3 -- View PATH
-
-Look for a value named:
-
-```
-Path
+# Navigate to: HKEY_CURRENT_USER\Environment
+# Find the Path value and see what it contains
 ```
 
 ---
 
 ## What to Notice
 
-- Environment variables exist in both:
-  - user scope (HKCU)
-  - system scope (HKLM)
-- The effective PATH is a combination of both
-- Changes here often require a new process (or restart) to take effect
-- Registry edits directly affect system behavior
-
----
-
-## Real-World Example
-
-You install a CLI tool using a package manager.
-
-- The installer updates PATH in the registry
-- New terminals can access the tool
-- Old terminals cannot
-
-Why?
-
-Because the updated PATH lives in the registry, but existing processes already inherited the old environment.
-
----
-
-## Debugging Strategy
-
-When debugging system behavior:
-
-1. Check if the setting exists in:
-   - HKCU (user)
-   - HKLM (system)
-2. Verify whether the issue is:
-   - per-user
-   - system-wide
-3. Use command-line tools:
-
-```powershell
-Get-ItemProperty "HKCU:\Environment"
-```
-
-4. Confirm whether a restart is required
+- `$env:PATH` in a running session and the registry PATH may differ -- the session value was inherited at startup, the registry is the persistent source
+- User PATH (HKCU) does not require admin to modify -- machine PATH (HKLM) does
+- Installers that write to machine PATH require elevation -- this is why some installs prompt for UAC
+- The registry uninstall keys are how Windows knows what is installed -- a missing entry means Windows does not know the software is there
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- The registry is a hierarchical configuration database
-- It separates user and system settings
-- Many environment variables originate from the registry
-- Behavior differences often come from HKCU vs HKLM differences
+- Where PATH is actually stored on Windows and how it differs from the in-memory value
+- The difference between HKCU and HKLM and when each requires elevation
+- How to use the registry to diagnose a broken installation
+- Why a PATH change does not affect currently running processes
 
-Strong answer example:
+Strong answer:
 
-“Windows stores many configuration values in the registry, including environment variables. User-level settings are stored in HKCU, while system-wide settings are in HKLM. Differences between these scopes can cause tools to behave differently depending on context.”
+"Environment variables including PATH are stored in the Windows registry -- user PATH in HKCU\\Environment and system PATH in HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment. When a process starts it reads these and copies them into its environment block. That copy is independent -- registry changes after that point require new processes to see the update. For debugging installs I check the registry uninstall keys to verify the installer completed correctly, and I compare the registry PATH against what I see in running sessions to catch cases where an installer added to PATH but the current terminal predates the install."
 
 ---
 
 <QuizSet
-  title="Registry Basics Assessment"
+  title="Windows Registry Assessment"
   passPercentage={67}
   questions={[
     {
-      question: "What is the Windows Registry?",
+      question: "Where is the Windows user PATH environment variable persistently stored?",
       options: [
-        "A file storage system",
-        "A hierarchical configuration database",
-        "A network protocol",
-        "A command-line shell"
+        "In a .env file in the user home directory",
+        "In HKCU\\Environment in the Windows Registry",
+        "In C:\\Windows\\System32\\path.cfg",
+        "In the PowerShell profile"
       ],
-      answer: "A hierarchical configuration database",
-      explanation: "The registry stores configuration data for the OS and applications."
+      answer: "In HKCU\\Environment in the Windows Registry",
+      explanation: "User-level environment variables including PATH are stored in HKEY_CURRENT_USER\\Environment. System-level PATH is in HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment. Both are read when a new process starts and copied into its environment block."
     },
     {
-      question: "What is the difference between HKCU and HKLM?",
+      question: "Why does modifying PATH in the registry not immediately affect running PowerShell sessions?",
       options: [
-        "They are identical",
-        "HKCU is user-specific, HKLM is system-wide",
-        "HKCU is for files, HKLM is for memory",
-        "HKLM is deprecated"
+        "Registry changes require a reboot",
+        "PowerShell does not read the registry",
+        "Running processes have already copied the environment at startup -- they do not re-read the registry",
+        "The registry change needs to be approved by Windows Update"
       ],
-      answer: "HKCU is user-specific, HKLM is system-wide",
-      explanation: "HKCU stores settings for the current user, while HKLM stores system-wide settings."
+      answer: "Running processes have already copied the environment at startup -- they do not re-read the registry",
+      explanation: "When a process starts, it reads registry environment values and copies them into its own environment block. That block is independent. Registry changes after startup only affect new processes. Opening a new terminal picks up the updated PATH."
     },
     {
-      question: "Why might a registry change not immediately affect a CLI tool?",
+      question: "What registry location would you check to verify a tool was successfully installed by an MSI installer?",
       options: [
-        "Because registry changes are ignored",
-        "Because processes must be restarted to inherit new values",
-        "Because only administrators can read the registry",
-        "Because CLI tools do not use environment variables"
+        "HKCU\\SOFTWARE\\Installed",
+        "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\",
+        "HKLM\\SYSTEM\\InstalledPrograms",
+        "HKCU\\Environment\\InstalledTools"
       ],
-      answer: "Because processes must be restarted to inherit new values",
-      explanation: "Processes inherit environment values at launch, so changes require a restart."
+      answer: "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\",
+      explanation: "MSI installers write an uninstall entry to this key when installation completes successfully. This is how Add/Remove Programs and winget list know what is installed. A missing entry suggests the install failed or was incomplete."
     }
   ]}
 />

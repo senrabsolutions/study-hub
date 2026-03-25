@@ -1,160 +1,264 @@
-# Windows Process Model Overview
+# Windows Process Model for CLI Engineers
 
 ## Why this matters
 
-Every CLI tool, script, and application runs inside a process.
+Every time Claude Code spawns a subprocess -- to run a test, execute git, invoke a build tool -- it is creating a new Windows process. Understanding what that means mechanically explains why subprocesses sometimes behave differently than expected: different PATH, different permissions, different working directory, different shell.
 
-If you understand how processes are created and managed, you can explain and debug:
-
-- why environment variables behave the way they do
-- why permissions differ between executions
-- how CLI tools launch other tools
-- why subprocesses sometimes fail unexpectedly
-
-This is foundational for:
-- Node.js CLI tools
-- PowerShell automation
-- debugging system-level issues
+Most Windows CLI bugs that seem mysterious have a process model explanation.
 
 ---
 
 ## Key Concepts
 
-- A **process** is a running instance of a program
-- Each process has:
-  - its own memory space
-  - its own environment variables
-  - a security context (user + permissions)
-- Processes are created by other processes (parent → child)
-- Child processes inherit:
-  - environment variables
-  - working directory
-  - security context (with some variation)
+- Every running program is a process with its own memory, environment, and security context
+- Processes are created by other processes -- the creator is the parent, the new process is the child
+- Child processes inherit environment variables, working directory, and security context from the parent at creation time
+- Inheritance is a snapshot -- changes to the parent after creation do not affect the child
+- Each process has a PID (Process ID) used to identify and manage it
 
 ---
 
-## Quick Summary
+## What a process actually contains
 
-All programs run as processes. When one process launches another, the child inherits key properties from the parent, which directly affects behavior.
+When Windows creates a process, it allocates:
+
+```
+Process
+├── Virtual memory space (private to this process)
+├── Environment block (copy of parent's environment at creation time)
+├── Working directory
+├── Security token (determines what the process can access)
+├── Handle table (open files, pipes, registry keys)
+└── One or more threads (execution contexts)
+```
+
+The environment block is a copy -- not a reference. If the parent later changes `$env:PATH`, the child does not see the change because it already has its own copy from when it was created.
+
+---
+
+## Process creation on Windows
+
+```powershell
+# PowerShell spawning a child process
+Start-Process -FilePath "node.exe" -ArgumentList "index.js"
+
+# Node.js spawning a child process
+$process = Start-Process -FilePath "git" -ArgumentList "status" -PassThru -Wait
+Write-Host "Exit code: $($process.ExitCode)"
+```
+
+In Node.js (the Claude Code codebase):
+
+```typescript
+import { spawn, exec } from "child_process";
+
+// spawn -- streams output, recommended for long-running processes
+const child = spawn("git", ["status"], {
+  cwd: "/project",           // working directory for this process
+  env: process.env,          // environment to pass (default: inherit from Node)
+  shell: false               // do NOT use a shell to invoke -- direct execution
+});
+
+// exec -- buffers output, simpler for short commands
+exec("git status", { cwd: "/project" }, (err, stdout, stderr) => {
+  console.log(stdout);
+});
+```
+
+---
+
+## Inheritance in practice
+
+The critical thing to understand: the child's environment is a snapshot of the parent's environment at creation time.
+
+```powershell
+# Parent process sets a variable
+$env:MY_TOOL_PATH = "C:\tools\bin"
+
+# Child process spawned NOW inherits MY_TOOL_PATH
+Start-Process powershell -ArgumentList "-Command", "echo $env:MY_TOOL_PATH"
+# Outputs: C:\tools\bin
+
+# Parent changes the variable AFTER spawning
+$env:MY_TOOL_PATH = "C:\new-tools\bin"
+
+# The already-running child still has the OLD value
+# It does NOT see C:\new-tools\bin
+```
+
+This explains "works in terminal, not in tool" problems. The terminal that launched Claude Code had a certain PATH at that moment. Claude Code inherited it. If PATH was later updated by an installer, Claude Code does not see the update -- it would need to be restarted.
+
+---
+
+## Security context and elevation
+
+Every Windows process runs with a security token that determines what it can access. When you "Run as Administrator," you get a new process with an elevated token.
+
+```powershell
+# Check your current security context
+whoami /groups | Select-String "Administrators"
+
+# Check if running elevated
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+Write-Host "Running as admin: $isAdmin"
+```
+
+**Why this matters for Claude Code:**
+
+If Claude Code is running as a normal user and tries to write to `C:\Program Files`, the operation fails with access denied -- not because the file is locked, but because the process's security token does not have write permission on that directory. Elevation is not inherited: a child process does not automatically get elevated privileges from an elevated parent unless explicitly requested.
+
+---
+
+## Process vs shell vs terminal
+
+These three things are often confused:
+
+```
+Terminal (Windows Terminal, ConEmu)
+  -- displays output, captures input
+  -- hosts a shell
+
+Shell (PowerShell, CMD, bash)
+  -- interprets commands
+  -- spawns child processes
+
+Process (node.exe, git.exe, python.exe)
+  -- the actual program doing work
+  -- may spawn its own child processes
+```
+
+When Claude Code spawns `git status`:
+1. Claude Code (node.exe) calls `CreateProcess` or uses Node's `child_process`
+2. Windows creates a new `git.exe` process
+3. `git.exe` inherits Claude Code's environment, working directory, and security context
+4. `git.exe` runs, outputs to stdout/stderr
+5. Claude Code reads that output and returns it as a tool result
+
+There is no shell involved unless `shell: true` is specified -- and on Windows that shell would be `cmd.exe`, not PowerShell.
+
+---
+
+## Viewing and managing processes
+
+```powershell
+# List all processes
+Get-Process
+
+# Find a specific process
+Get-Process -Name "node"
+
+# Show process with parent info
+Get-Process | Select-Object Id, ProcessName, @{N="Parent";E={(Get-Process -Id $_.Parent.Id -ErrorAction SilentlyContinue).ProcessName}}
+
+# Kill a process
+Stop-Process -Name "node"
+Stop-Process -Id 1234
+
+# Watch CPU and memory
+Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name, CPU, WorkingSet
+```
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- View running processes
+### Step 1 -- Observe environment inheritance
 
 ```powershell
-Get-Process | Select-Object -First 5
+# Set a variable in parent
+$env:TEST_INHERIT = "from-parent"
+
+# Spawn a child PowerShell and check
+$output = & powershell -Command { $env:TEST_INHERIT }
+Write-Host "Child sees: $output"
+
+# Change parent variable AFTER child would have inherited
+$env:TEST_INHERIT = "changed"
+# A new child spawned now would see "changed"
+# But the child above already ran with "from-parent"
 ```
 
-### Step 2 -- Launch a child process
+### Step 2 -- Check your process's security context
 
 ```powershell
-Start-Process notepad
+whoami
+whoami /groups | Select-String "Administrators"
+[Security.Principal.WindowsIdentity]::GetCurrent().Name
 ```
 
-### Step 3 -- Spawn a process from Node
+### Step 3 -- Trace a subprocess in Node
 
-```bash
-node -e "require('child_process').exec('notepad')"
+```powershell
+node -e "
+const {spawn} = require('child_process');
+const p = spawn('node', ['-e', 'console.log(process.env.PATH.split(\";\").length + \" PATH entries\")']);
+p.stdout.on('data', d => console.log('child says:', d.toString().trim()));
+p.on('close', code => console.log('exit code:', code));
+"
 ```
 
 ---
 
 ## What to Notice
 
-- Every program you run becomes a process
-- Processes can create other processes
-- Tools like Node and PowerShell act as parent processes
-- Child processes inherit environment and context from the parent
-
----
-
-## Real-World Example
-
-A Node CLI tool runs a subprocess:
-
-```bash
-git clone ...
-```
-
-If Git fails, it might not be Git itself -- it could be:
-
-- missing PATH in the parent process
-- incorrect working directory
-- permission issues inherited from the parent
-
----
-
-## Debugging Strategy
-
-When a subprocess fails:
-
-1. Check what process launched it
-2. Inspect environment variables
-3. Confirm PATH is correct
-4. Check working directory
-5. Verify permissions
-
-In PowerShell:
-
-```powershell
-Get-Process
-```
+- Environment inheritance is a one-time copy at process creation -- parent changes after that point are invisible to the child
+- Running without `shell: true` is safer and faster -- no shell parsing layer, direct process creation
+- The security token determines what a process can access -- elevation is not automatic and not inherited
+- Process ID (PID) is how the OS tracks processes -- tools like Task Manager and `Get-Process` both show PIDs
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- Everything runs inside a process
-- Processes are created by other processes
-- Child processes inherit environment and context
-- Many CLI bugs come from incorrect assumptions about the parent process
+- What a process inherits from its parent and when that inheritance happens
+- Why a subprocess might have different PATH than an interactive shell
+- The difference between running with and without `shell: true` in Node
+- How security tokens affect what a process can access
 
-Strong answer example:
+Strong answer:
 
-“When a CLI tool behaves unexpectedly, I think in terms of process boundaries. The tool runs as a process and may spawn child processes. Those children inherit environment variables, working directory, and permissions, so issues often come from what the parent process provided.”
+"Windows processes inherit environment variables, working directory, and security context from their parent at creation time -- it is a snapshot, not a live reference. This explains most 'works in my terminal, fails in the tool' problems: the tool's process was created when the terminal had a different environment. For Claude Code specifically, spawning subprocesses without shell: true is preferred -- it avoids the cmd.exe quoting layer and is more predictable. Security context matters too -- a non-elevated process trying to write to Program Files will get access denied regardless of who owns the code."
 
 ---
 
 <QuizSet
-  title="Process Model Assessment"
+  title="Windows Process Model Assessment"
   passPercentage={67}
   questions={[
     {
-      question: "What is a process?",
+      question: "A developer updates PATH in their terminal after launching Claude Code. Why does Claude Code not see the updated PATH?",
       options: [
-        "A file on disk",
-        "A running instance of a program",
-        "A network connection",
-        "A registry key"
+        "Claude Code caches PATH on startup",
+        "Environment variables are copied at process creation -- Claude Code inherited the old PATH when it started",
+        "PATH updates require a reboot",
+        "Claude Code ignores PATH entirely"
       ],
-      answer: "A running instance of a program",
-      explanation: "A process is a program in execution with its own memory and context."
+      answer: "Environment variables are copied at process creation -- Claude Code inherited the old PATH when it started",
+      explanation: "Child processes receive a snapshot of the parent environment at creation time. Changes to the parent after that point are not reflected in already-running child processes. Claude Code would need to be restarted to pick up the updated PATH."
     },
     {
-      question: "What do child processes inherit from a parent process?",
+      question: "What happens when Node.js spawns a subprocess with shell: false on Windows?",
       options: [
-        "Only the executable file",
-        "Environment variables, working directory, and context",
-        "Nothing at all",
-        "Only registry values"
+        "The command fails because Windows requires a shell",
+        "Windows creates the process directly without cmd.exe as an intermediary -- faster and no shell quoting issues",
+        "The subprocess runs in PowerShell automatically",
+        "Environment variables are not passed to the subprocess"
       ],
-      answer: "Environment variables, working directory, and context",
-      explanation: "Child processes inherit key execution context from their parent."
+      answer: "Windows creates the process directly without cmd.exe as an intermediary -- faster and no shell quoting issues",
+      explanation: "shell: false invokes the executable directly via CreateProcess. shell: true routes through cmd.exe which adds quoting complexity and is slower. For known executables like git or node, shell: false is the correct choice."
     },
     {
-      question: "Why might a subprocess fail even if the command works manually?",
+      question: "A CLI tool works when run as Administrator but fails with access denied for normal users. What is the most likely cause?",
       options: [
-        "Because subprocesses are random",
-        "Because the parent process environment or context is different",
-        "Because Windows blocks subprocesses",
-        "Because CLI tools cannot spawn processes"
+        "The tool has a bug that only appears for normal users",
+        "The process security token for normal users does not have the required ACL permissions on the target resource",
+        "Normal users cannot run CLI tools",
+        "The PATH is different for administrators"
       ],
-      answer: "Because the parent process environment or context is different",
-      explanation: "Subprocesses depend on the environment provided by the parent process."
+      answer: "The process security token for normal users does not have the required ACL permissions on the target resource",
+      explanation: "Every process runs with a security token that determines access. Administrator processes have an elevated token with broader permissions. Normal user processes are restricted by the ACLs on protected directories like Program Files. The fix is either elevating the process or writing to a user-writable location."
     }
   ]}
 />

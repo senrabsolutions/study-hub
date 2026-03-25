@@ -1,127 +1,291 @@
-# Terminal I/O (stdin, stdout, stderr)
+# Terminal I/O: stdin, stdout, stderr, and TTY Detection
 
 ## Why this matters
 
-CLI tools don’t just take input -- they **communicate**.
+Claude Code is a CLI tool that reads input, writes output, and needs to behave correctly whether it is running interactively in a terminal, piped into another tool, or running in a CI environment with no terminal at all. Getting terminal I/O wrong causes garbled output, broken pipes, and tools that behave differently in automation than in interactive use.
 
-Understanding terminal I/O is critical for:
-
-- piping commands together (`|`)
-- handling input from other tools
-- producing usable output
-- debugging failures
-
-If you don’t understand stdin, stdout, and stderr, you can’t fully understand how CLI tools interact.
+This is one of the areas where Windows behaves differently from Unix in ways that matter.
 
 ---
 
 ## Key Concepts
 
-- CLI programs communicate using three streams:
-
-  - **stdin (standard input)** → data coming *into* the program  
-  - **stdout (standard output)** → normal output  
-  - **stderr (standard error)** → error messages  
-
-- These streams can be redirected or piped between programs
-
-- Example:
-
-```bash
-command1 | command2
-```
-
-- Output of `command1` becomes input of `command2`
+- Every process has three standard streams: stdin (0), stdout (1), stderr (2)
+- Streams can be redirected or piped -- the program does not always know where they go
+- TTY detection determines whether the output is a real terminal or a pipe/file
+- Color codes and progress indicators should only be written to a real terminal
+- Windows has different TTY detection APIs than Unix -- and some terminal emulators misreport
 
 ---
 
-## Quick Summary
+## The three streams
 
-CLI tools read input from stdin, write normal output to stdout, and write errors to stderr. These streams enable chaining tools together.
+```
+stdin  (fd 0) -- data coming IN to the program
+stdout (fd 1) -- normal output going OUT
+stderr (fd 2) -- errors and diagnostics going OUT
+```
+
+```javascript
+// Node.js
+process.stdin   // Readable stream
+process.stdout  // Writable stream
+process.stderr  // Writable stream
+
+// Writing to stdout vs stderr
+process.stdout.write("normal output\n");
+process.stderr.write("error message\n");
+console.log("goes to stdout");
+console.error("goes to stderr");
+```
+
+**Why the distinction matters:**
+
+```powershell
+# Redirect stdout to a file -- stderr still goes to terminal
+node app.js > output.txt
+
+# Redirect stderr to a file -- stdout still goes to terminal
+node app.js 2> errors.txt
+
+# Redirect both
+node app.js > output.txt 2>&1
+
+# Pipe stdout to another command -- stderr bypasses the pipe
+node app.js | another-tool
+```
+
+If a tool writes error messages to stdout instead of stderr, they get captured by pipes and break downstream tools that expect only data on stdout.
+
+---
+
+## TTY detection
+
+A TTY (teletypewriter) is a real interactive terminal. When stdout is a TTY, it makes sense to:
+- Output ANSI color codes
+- Show progress spinners
+- Use interactive prompts
+- Format output for human reading
+
+When stdout is a pipe or file, you should:
+- Output plain text without color codes
+- Skip progress indicators
+- Never use interactive prompts (they hang)
+- Output machine-parseable format if possible
+
+```javascript
+// Node.js TTY detection
+const isInteractive = process.stdout.isTTY;   // true if stdout is a terminal
+const stdinIsTTY = process.stdin.isTTY;        // true if stdin is a terminal
+
+if (isInteractive) {
+  // Safe to use colors and progress indicators
+  console.log("\x1b[32mSuccess\x1b[0m");  // green text
+} else {
+  // Plain output for pipes and CI
+  console.log("Success");
+}
+```
+
+---
+
+## Windows TTY detection complications
+
+On Windows, TTY detection is more complex because of the variety of terminal environments:
+
+```
+Windows Terminal      -- proper TTY, isTTY = true
+VS Code terminal      -- proper TTY, isTTY = true
+PowerShell ISE        -- NOT a TTY, isTTY = false
+ConEmu                -- usually TTY, isTTY = true
+Git Bash (MINGW)      -- varies, may report differently
+CI/CD (no terminal)   -- NOT a TTY, isTTY = false
+Piped: cmd | node     -- NOT a TTY, isTTY = false
+```
+
+Additionally, Windows terminals historically had limited ANSI support. Modern Windows 10/11 and Windows Terminal support ANSI sequences natively, but older environments or certain configurations may not:
+
+```javascript
+// More robust color support detection for Windows
+function supportsColor() {
+  if (!process.stdout.isTTY) return false;
+  
+  // Windows Terminal, VS Code set this
+  if (process.env.COLORTERM === "truecolor" || process.env.COLORTERM === "24bit") {
+    return true;
+  }
+  
+  // Check Windows-specific env var
+  if (process.env.TERM_PROGRAM === "vscode") return true;
+  
+  // Windows Terminal
+  if (process.env.WT_SESSION) return true;
+  
+  // Fallback: on Windows, check if ANSI is enabled
+  if (process.platform === "win32") {
+    // Windows 10 1511+ supports ANSI with VirtualTerminalProcessing enabled
+    return process.env.TERM !== undefined || process.env.ANSICON !== undefined;
+  }
+  
+  return true;
+}
+```
+
+---
+
+## Piping and stream behavior in Node.js
+
+```javascript
+// Reading from stdin (when piped to your tool)
+// cat file.txt | node app.js
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  // Process complete input
+  console.log("Received:", input.length, "bytes");
+});
+
+// Check if stdin has data (is it a pipe or interactive?)
+if (!process.stdin.isTTY) {
+  // stdin is being piped -- read it
+  process.stdin.resume();
+} else {
+  // Interactive -- show a prompt
+  console.log("Enter input:");
+}
+```
+
+---
+
+## Exit codes
+
+Exit codes are how a process communicates success or failure to the parent:
+
+```javascript
+// Success
+process.exit(0);
+
+// Failure
+process.exit(1);
+
+// Node.js specific -- exit with error from uncaught exception
+process.exitCode = 1;  // set but don't exit yet
+```
+
+```powershell
+# Check exit code in PowerShell
+node app.js
+Write-Host "Exit code: $LASTEXITCODE"
+
+# Use in scripts
+node app.js
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "Tool failed with exit code $LASTEXITCODE"
+  exit 1
+}
+```
+
+```batch
+:: Check exit code in CMD
+node app.js
+if %ERRORLEVEL% neq 0 (
+  echo Tool failed
+  exit /b 1
+)
+```
+
+**Common exit code conventions:**
+- `0` -- success
+- `1` -- general error
+- `2` -- misuse of shell command (argument error)
+- `127` -- command not found (Unix convention, sometimes used)
+- `130` -- terminated by Ctrl+C (Unix convention)
+
+---
+
+## The \r\n problem in terminal output
+
+On Windows, `os.EOL` is `\r\n`. Using it for terminal output (not file I/O) causes rendering bugs:
+
+```javascript
+// WRONG for terminal output
+process.stdout.write(`Result: ${value}${os.EOL}`);
+// The \r moves cursor to column 0 before \n advances the line
+// ANSI color codes written after this get applied from column 0
+// Text and colors appear to overwrite each other
+
+// CORRECT -- always use \n for terminal output
+process.stdout.write(`Result: ${value}\n`);
+```
+
+This was an actual Claude Code bug on Windows. Terminal emulators on all platforms handle `\n` correctly. `os.EOL` is for file content, not terminal streams.
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- Output to stdout
+### Step 1 -- Check TTY status in your environment
 
-```bash
-echo "hello world"
+```powershell
+node -e "console.log('isTTY:', process.stdout.isTTY)"
+
+# Now pipe it -- should be false
+node -e "console.log('isTTY:', process.stdout.isTTY)" | cat
+
+# In PowerShell
+node -e "console.log('isTTY:', process.stdout.isTTY)" | Write-Output
 ```
 
-### Step 2 -- Pipe output
+### Step 2 -- Separate stdout and stderr
 
-```bash
-echo "hello world" | findstr hello
+```powershell
+# Create a script that writes to both
+node -e "
+process.stdout.write('stdout message\n');
+process.stderr.write('stderr message\n');
+"
+
+# Redirect only stdout
+node -e "
+process.stdout.write('stdout message\n');
+process.stderr.write('stderr message\n');
+" > stdout-only.txt
+# stdout-only.txt should have only 'stdout message'
+# 'stderr message' should appear in terminal
 ```
 
-### Step 3 -- Node example
+### Step 3 -- Test exit codes
 
-```bash
-node -e "process.stdout.write('output\n'); process.stderr.write('error\n');"
+```powershell
+node -e "process.exit(0)"; Write-Host "Exit: $LASTEXITCODE"  # 0
+node -e "process.exit(1)"; Write-Host "Exit: $LASTEXITCODE"  # 1
+node -e "throw new Error('oops')"; Write-Host "Exit: $LASTEXITCODE"  # 1
 ```
 
 ---
 
 ## What to Notice
 
-- stdout and stderr are separate streams
-- piping (`|`) only passes stdout, not stderr
-- CLI tools can be chained together using these streams
-- tools behave differently depending on how input is provided
-
----
-
-## Real-World Example
-
-A CLI tool outputs logs:
-
-```bash
-mytool run > output.log
-```
-
-Errors still appear in the terminal.
-
-Why?
-
-Because:
-- stdout is redirected to a file
-- stderr is not
-
----
-
-## Debugging Strategy
-
-When debugging CLI behavior:
-
-1. Check what is being written to stdout vs stderr
-2. Test commands with piping
-3. Redirect output to inspect behavior:
-
-```bash
-command > out.txt
-command 2> error.txt
-```
-
-4. Confirm whether input is coming from:
-   - user input
-   - another command
-   - a file
+- `process.stdout.isTTY` is undefined (falsy) when output is piped -- check for `=== true` not just truthiness
+- Always write errors to `process.stderr`, not `process.stdout` -- pipes only capture stdout
+- `\n` not `os.EOL` for terminal output -- `os.EOL` is for file content
+- On Windows, some environments (PowerShell ISE, older ConEmu) misreport TTY status -- the COLORTERM and WT_SESSION env vars are more reliable indicators
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- CLI tools use stdin, stdout, and stderr for communication
-- stdout is used for normal output, stderr for errors
-- piping connects stdout of one tool to stdin of another
-- proper stream usage makes tools composable
+- The difference between stdout and stderr and why it matters for piping
+- What TTY detection is and why it affects color output and prompts
+- Why `os.EOL` should not be used for terminal output on Windows
+- How to correctly check for interactive vs piped execution in Node.js
 
-Strong answer example:
+Strong answer:
 
-“CLI tools communicate through standard streams. stdout is used for normal output, stderr for errors, and stdin for input. This allows tools to be composed using pipes, which is a core part of CLI design.”
+"stdout and stderr are separate streams -- tools that mix them break piping because downstream tools receive error messages mixed into their expected data. TTY detection tells the tool whether it is running interactively or piped, which determines whether to output ANSI colors, show progress spinners, or use plain text. On Windows, isTTY is not always reliable -- Windows Terminal sets WT_SESSION, VS Code sets TERM_PROGRAM, so checking those env vars gives a more accurate picture. And os.EOL should never be used for terminal output -- the \\r in \\r\\n causes cursor position issues that garble ANSI escape sequences."
 
 ---
 
@@ -130,37 +294,37 @@ Strong answer example:
   passPercentage={67}
   questions={[
     {
-      question: "What does stdout represent?",
+      question: "A CLI tool outputs ANSI color codes but they appear as raw escape characters when the output is piped to a file. What should the tool do instead?",
       options: [
-        "Input to a program",
-        "Normal output from a program",
-        "Error messages only",
-        "Registry data"
+        "Always output color codes regardless",
+        "Check process.stdout.isTTY and only output color codes when connected to a real terminal",
+        "Use a different color library",
+        "Write to stderr instead"
       ],
-      answer: "Normal output from a program",
-      explanation: "stdout is used for standard program output."
+      answer: "Check process.stdout.isTTY and only output color codes when connected to a real terminal",
+      explanation: "ANSI color codes are interpreted by terminal emulators. When stdout is a pipe or file, there is no terminal to interpret them -- they appear as raw escape characters. TTY detection lets the tool use human-friendly formatting interactively and machine-parseable output when piped."
     },
     {
-      question: "What happens when you use a pipe (|)?",
+      question: "Why should error messages be written to stderr rather than stdout?",
       options: [
-        "It deletes output",
-        "It sends stdout of one command to stdin of another",
-        "It combines files",
-        "It modifies environment variables"
+        "stderr is faster to write to",
+        "Errors written to stdout get captured by pipes and mixed into data, breaking downstream tools",
+        "stdout does not support error messages",
+        "stderr is displayed in red automatically"
       ],
-      answer: "It sends stdout of one command to stdin of another",
-      explanation: "Pipes connect the output of one program to the input of another."
+      answer: "Errors written to stdout get captured by pipes and mixed into data, breaking downstream tools",
+      explanation: "When a tool is piped (tool1 | tool2), tool2 receives only tool1&apos;s stdout. Error messages on stdout corrupt the data stream tool2 expects. Stderr bypasses the pipe and goes directly to the terminal."
     },
     {
-      question: "Why are stderr and stdout separate?",
+      question: "Why does using os.EOL for terminal output cause rendering bugs on Windows?",
       options: [
-        "For performance reasons only",
-        "So errors can be handled or redirected independently",
-        "Because Windows requires it",
-        "To reduce memory usage"
+        "os.EOL is deprecated in Node.js",
+        "The \\r in Windows os.EOL (\\r\\n) moves the cursor to column zero, causing subsequent output to overwrite the line",
+        "Windows Terminal does not support os.EOL",
+        "os.EOL outputs nothing on Windows"
       ],
-      answer: "So errors can be handled or redirected independently",
-      explanation: "Separating stderr allows better debugging and control over output."
+      answer: "The \\r in Windows os.EOL (\\r\\n) moves the cursor to column zero, causing subsequent output to overwrite the line",
+      explanation: "Carriage return (\\r) is a cursor control character that moves to the start of the current line without advancing. When ANSI color codes or text follow, they overwrite previous content. Terminal output should always use \\n only -- os.EOL is for file content where \\r\\n is appropriate."
     }
   ]}
 />

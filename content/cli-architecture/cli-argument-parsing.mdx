@@ -2,139 +2,282 @@
 
 ## Why this matters
 
-Every CLI tool starts with one thing:
+Argument parsing is the first thing that runs when a user invokes Claude Code. If parsing is wrong, every downstream operation is wrong. Understanding how argument parsing actually works -- `process.argv`, quoting, flag types, subcommands -- means you can debug why a command behaves unexpectedly and design interfaces that work correctly in all shell environments.
 
-👉 parsing user input
-
-If argument parsing is unclear or inconsistent, the tool becomes:
-
-- hard to use
-- hard to debug
-- easy to misuse
-
-Understanding argument parsing helps you:
-
-- design clean, predictable CLI interfaces
-- debug why commands behave unexpectedly
-- explain how real tools (npm, git, etc.) interpret input
+This matters specifically on Windows because quoting rules differ between CMD, PowerShell, and bash, and what the user types is not always what arrives in `process.argv`.
 
 ---
 
 ## Key Concepts
 
-- CLI input is just a list of strings passed to the program
-- Arguments are typically structured as:
-  - commands (`git commit`)
-  - flags (`--verbose`)
-  - options (`--port=3000`)
-- In Node.js:
-
-```js
-process.argv
-```
-
-contains the raw input
-
-Example:
-
-```bash
-node app.js --port=3000
-```
-
-Becomes:
-
-```js
-[
-  "node",
-  "app.js",
-  "--port=3000"
-]
-```
-
-- Parsing transforms raw strings into structured data
+- `process.argv` contains raw strings -- the shell has already processed quotes and escaping before Node sees them
+- Flags can be boolean (`--verbose`), valued (`--port=3000` or `--port 3000`), or short (`-v`)
+- Subcommands (`git commit`, `npm install`) are a pattern on top of basic argument parsing
+- Variadic arguments (`file1 file2 file3`) require special handling
+- The `--` separator signals the end of flags and start of positional arguments
 
 ---
 
-## Quick Summary
+## What process.argv actually contains
 
-Argument parsing converts raw command-line input into structured values that your program can use.
+```javascript
+// Running: node app.js --port=3000 --verbose file.ts
+console.log(process.argv);
+// [
+//   '/usr/local/bin/node',     // argv[0] -- node executable
+//   '/project/app.js',          // argv[1] -- script path
+//   '--port=3000',              // argv[2] -- first argument
+//   '--verbose',                // argv[3]
+//   'file.ts'                   // argv[4]
+// ]
+
+// The useful part starts at index 2
+const args = process.argv.slice(2);
+// ['--port=3000', '--verbose', 'file.ts']
+```
+
+The shell processes quotes and escaping before passing arguments to Node. By the time `process.argv` is populated, quoting is resolved:
+
+```powershell
+# User types in PowerShell:
+node app.js --message "hello world"
+
+# process.argv receives:
+# ['--message', 'hello world']   <- quote marks gone, one string
+```
+
+---
+
+## Parsing by hand vs using a library
+
+Hand-parsing is rarely the right choice:
+
+```javascript
+// Hand-parsing -- handles simple cases but breaks on edge cases
+const args = process.argv.slice(2);
+const port = args.find(a => a.startsWith("--port="))?.split("=")[1];
+// Fails for: --port 3000 (space instead of =)
+// Fails for: -p 3000 (short flag)
+// Fails for: --port=3000 --port=4000 (duplicate)
+```
+
+Use a library -- the Claude Code codebase uses Commander:
+
+```typescript
+import { Command } from "commander";
+
+const program = new Command();
+
+program
+  .name("claude")
+  .description("Claude Code CLI")
+  .version("1.0.0");
+
+program
+  .command("run [file]")
+  .description("Run Claude on a file or interactively")
+  .option("-m, --model <model>", "Model to use", "claude-opus-4-5")
+  .option("-v, --verbose", "Verbose output")
+  .option("--max-tokens <number>", "Maximum tokens", parseInt)
+  .action((file, options) => {
+    console.log("File:", file);
+    console.log("Model:", options.model);
+    console.log("Verbose:", options.verbose);
+    console.log("Max tokens:", options.maxTokens);
+  });
+
+program.parse(process.argv);
+```
+
+---
+
+## Flag types and their parsing
+
+**Boolean flags** -- presence means true, absence means false:
+```
+--verbose          options.verbose = true
+(no --verbose)     options.verbose = false
+```
+
+**Value flags** -- require a value, two syntaxes:
+```
+--port=3000        options.port = "3000"
+--port 3000        options.port = "3000"  (next argument consumed)
+```
+
+**Short flags** -- single character:
+```
+-v                 options.verbose = true
+-p 3000            options.port = "3000"
+-vp 3000           options.verbose = true, options.port = "3000"  (combined)
+```
+
+**Negatable flags** -- Commander and some parsers support `--no-` prefix:
+```
+--no-color         options.color = false  (overrides default of true)
+```
+
+---
+
+## Subcommands
+
+Git-style subcommands (`git commit`, `git push`) are built on top of basic argument parsing:
+
+```typescript
+program
+  .command("config <key> [value]")
+  .description("Get or set a config value")
+  .action((key, value) => {
+    if (value === undefined) {
+      // Get
+      console.log(getConfig(key));
+    } else {
+      // Set
+      setConfig(key, value);
+    }
+  });
+
+// Usage:
+// claude config model                 <- get
+// claude config model claude-opus-4-5  <- set
+```
+
+The first argument after the program name is the subcommand. Everything after that belongs to the subcommand.
+
+---
+
+## The -- separator
+
+`--` is a universal convention that means "everything after this is a positional argument, not a flag":
+
+```bash
+# This is ambiguous -- is -f a flag for node or for the script?
+node app.js -f
+
+# This is clear -- -f is for the script, not node
+node -- app.js -f
+
+# Passing negative numbers (look like flags)
+node app.js -- -42     # -42 is a positional argument, not a flag
+```
+
+```typescript
+// In Commander, -- is handled automatically
+// Arguments after -- are in program.args as positional args
+```
+
+---
+
+## Windows quoting problems with process.argv
+
+Different Windows shells send arguments differently:
+
+```powershell
+# PowerShell -- globs are expanded by default
+node app.js *.ts
+# process.argv gets the expanded list: ['file1.ts', 'file2.ts', ...]
+
+# To prevent expansion:
+node app.js '*.ts'      # single quotes prevent expansion
+node app.js "*.ts"      # double quotes also prevent in PowerShell
+```
+
+```batch
+:: CMD -- no glob expansion (unlike bash/PowerShell)
+node app.js *.ts
+:: process.argv gets literally: ['*.ts']  -- not expanded
+```
+
+This is a cross-shell inconsistency that tool authors must handle. If your tool accepts glob patterns, document which shell expands them and which does not.
+
+---
+
+## Argument validation
+
+After parsing, validate before using:
+
+```typescript
+function validateArgs(options: ParsedOptions): void {
+  if (options.maxTokens !== undefined) {
+    if (isNaN(options.maxTokens) || options.maxTokens <= 0) {
+      console.error("Error: --max-tokens must be a positive number");
+      process.exit(2);  // exit code 2 = argument error
+    }
+  }
+
+  if (options.model && !VALID_MODELS.includes(options.model)) {
+    console.error(`Error: Unknown model "${options.model}"`);
+    console.error(`Valid models: ${VALID_MODELS.join(", ")}`);
+    process.exit(2);
+  }
+}
+```
+
+Exit code 2 is the conventional exit code for argument/usage errors. This allows scripts to distinguish between "tool ran and failed" (exit 1) and "tool was called incorrectly" (exit 2).
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- Create a simple script
+### Step 1 -- Inspect raw process.argv
 
-```js
-console.log(process.argv);
+```powershell
+# See exactly what Node receives
+node -e "console.log(JSON.stringify(process.argv))" -- --port=3000 "hello world" --verbose
+
+# Try with different quote styles and see if the result differs
+node -e "console.log(JSON.stringify(process.argv))" -- "hello world"
+node -e "console.log(JSON.stringify(process.argv))" -- 'hello world'
 ```
 
-### Step 2 -- Run it
+### Step 2 -- Test glob behavior
 
-```bash
-node app.js hello --port=3000 --debug
+```powershell
+# Create some test files
+New-Item test1.ts, test2.ts -ItemType File
+
+# In PowerShell -- does *.ts get expanded?
+node -e "console.log(process.argv.slice(2))" -- *.ts
+
+# Expected in PowerShell: ['test1.ts', 'test2.ts']  (expanded)
+# Expected in CMD: ['*.ts']  (not expanded)
 ```
 
-### Step 3 -- Observe output
+### Step 3 -- Check Claude Code argument parsing
 
-You’ll see all arguments as strings.
+```powershell
+# What flags does Claude Code accept?
+claude --help
+
+# What happens with an invalid flag?
+claude --invalid-flag-that-doesnt-exist
+# Check the exit code
+Write-Host "Exit: $LASTEXITCODE"
+```
 
 ---
 
 ## What to Notice
 
-- Everything starts as raw strings
-- Flags and values are not automatically parsed
-- Your program (or a library) must interpret them
-- Order and format matter
-
----
-
-## Real-World Example
-
-A CLI tool supports:
-
-```bash
-mytool deploy --env=prod --verbose
-```
-
-Internally, it parses:
-
-```js
-{
-  command: "deploy",
-  env: "prod",
-  verbose: true
-}
-```
-
----
-
-## Debugging Strategy
-
-When CLI behavior is wrong:
-
-1. Inspect raw input (`process.argv`)
-2. Confirm flags are formatted correctly
-3. Check for:
-   - missing `=` vs space-separated values
-   - incorrect flag names
-   - ordering issues
+- `process.argv[0]` is node, `process.argv[1]` is the script -- useful args start at index 2
+- The shell processes quoting before Node sees the arguments -- quotes are gone from `process.argv`
+- PowerShell expands globs before passing to the program; CMD does not -- this is a cross-shell inconsistency
+- Exit code 2 for argument errors is a convention worth following -- scripts can detect misuse vs failure
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- CLI input is passed as raw strings
-- Tools must parse and interpret arguments
-- Structured parsing enables predictable behavior
-- Libraries are often used to simplify parsing
+- What `process.argv` contains and why quotes are already resolved
+- The difference between boolean, value, and short flags
+- Why glob arguments behave differently in PowerShell vs CMD
+- Why exit code 2 is used for argument errors
 
-Strong answer example:
+Strong answer:
 
-“CLI input comes in as raw strings via process.argv. A tool needs to parse those into structured values like flags and options. Using a consistent parsing strategy ensures predictable and user-friendly behavior.”
+"process.argv starts with the node path and script path, so useful arguments are at index 2 onward. By the time Node sees them, the shell has already resolved quoting -- 'hello world' arrives as a single string without quotes. On Windows, this creates a cross-shell difference with globs: PowerShell expands *.ts into a list of files before passing to the program, but CMD passes the literal string *.ts. Tools that accept file arguments need to handle both cases. For argument parsing I use Commander rather than hand-parsing -- it handles the flag syntax edge cases that manual parsing always gets wrong."
 
 ---
 
@@ -143,37 +286,37 @@ Strong answer example:
   passPercentage={67}
   questions={[
     {
-      question: "How are CLI arguments received in Node.js?",
+      question: "A user runs: node app.js --message &apos;hello world&apos;. What does process.argv contain for that argument?",
       options: [
-        "Through the registry",
-        "Through process.argv as an array of strings",
-        "Through environment variables only",
-        "Through config files"
+        "[&apos;--message&apos;, \"&apos;hello world&apos;\"] with single quotes included",
+        "[&apos;--message&apos;, &apos;hello world&apos;] with quotes resolved by the shell",
+        "[&apos;--message=hello world&apos;]",
+        "[&apos;--message&apos;, &apos;hello&apos;, &apos;world&apos;] split into two arguments"
       ],
-      answer: "Through process.argv as an array of strings",
-      explanation: "Node provides CLI input via process.argv."
+      answer: "[&apos;--message&apos;, &apos;hello world&apos;] with quotes resolved by the shell",
+      explanation: "The shell processes quoting before passing arguments to Node. Single or double quotes group words into a single argument and the quote characters are removed. By the time process.argv is populated, quotes are gone and &apos;hello world&apos; is a single string."
     },
     {
-      question: "Why is argument parsing necessary?",
+      question: "What does the -- separator signal to a CLI argument parser?",
       options: [
-        "To convert raw strings into structured values",
-        "To improve network speed",
-        "To access the filesystem",
-        "To modify registry keys"
+        "End of the program -- exit after this",
+        "Everything after -- is a positional argument, not a flag -- prevents negative numbers or paths starting with - from being parsed as flags",
+        "Start of a subcommand",
+        "Comment -- everything after is ignored"
       ],
-      answer: "To convert raw strings into structured values",
-      explanation: "Parsing turns raw input into usable program data."
+      answer: "Everything after -- is a positional argument, not a flag -- prevents negative numbers or paths starting with - from being parsed as flags",
+      explanation: "-- is a universal convention telling the parser to stop looking for flags. Useful when passing values that look like flags (negative numbers like -42, paths like -output) as positional arguments."
     },
     {
-      question: "What problem occurs without proper parsing?",
+      question: "What is the correct exit code for a CLI tool when it receives invalid arguments?",
       options: [
-        "The OS crashes",
-        "Input becomes unpredictable and hard to use",
-        "Environment variables stop working",
-        "Permissions are ignored"
+        "0 -- success",
+        "1 -- general error",
+        "2 -- argument/usage error",
+        "127 -- command not found"
       ],
-      answer: "Input becomes unpredictable and hard to use",
-      explanation: "Without parsing, tools cannot reliably interpret user input."
+      answer: "2 -- argument/usage error",
+      explanation: "Exit code 2 is the conventional code for incorrect command usage or invalid arguments. Scripts can use this to distinguish between the tool failing at its task (exit 1) and the tool being called incorrectly (exit 2). This allows better error handling in automation."
     }
   ]}
 />

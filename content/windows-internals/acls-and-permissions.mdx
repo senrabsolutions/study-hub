@@ -1,129 +1,247 @@
-# ACLs and Permissions
+# Windows ACLs and Permissions for CLI Engineers
 
 ## Why this matters
 
-Windows permissions are one of the most common sources of confusing, inconsistent failures.
+Windows permissions cause a specific class of CLI failure: the tool runs, no exception is thrown, but the operation silently does nothing -- or throws "Access is denied" with no useful context. Understanding how ACLs work means you can diagnose these failures in minutes rather than guessing.
 
-If a CLI tool works when run as Administrator but fails for a normal user, permissions are almost always the cause.
-
-Understanding ACLs (Access Control Lists) helps you debug:
-
-- "Access denied" errors
-- tools failing silently
-- scripts that work in one context but not another
-- file system operations behaving inconsistently
-
-This is especially important for CLI tools that:
-- read/write files
-- install software
-- modify system state
+This is directly relevant to Claude Code: file read and write tool implementations must handle permission failures gracefully and give users actionable guidance, not raw error codes.
 
 ---
 
 ## Key Concepts
 
-- Every file and directory has an **ACL (Access Control List)**
-- An ACL is made up of **ACEs (Access Control Entries)**
-- Each ACE defines permissions for a user or group
-- Common permissions:
-  - Read
-  - Write
-  - Execute
-  - Full Control
-- Permissions are evaluated based on:
-  - user identity
-  - group membership
-  - explicit deny rules
-- **Deny rules override allow rules**
+- Every file and directory on NTFS has an ACL (Access Control List)
+- An ACL contains ACEs (Access Control Entries) -- one per user or group
+- Each ACE grants or denies specific rights: Read, Write, Execute, Full Control, etc.
+- Deny ACEs override Allow ACEs regardless of order
+- Effective permissions are the combination of all applicable ACEs including group memberships
+- The integrity level system (UAC) adds another layer on top of ACLs
 
 ---
 
-## Quick Summary
+## How ACLs are evaluated
 
-Windows uses ACLs to determine who can access what. When something fails with a permissions error, it’s usually because the current user does not have the required access according to the ACL.
+When a process tries to access a file, Windows:
+
+1. Gets the process's security token (user identity + group memberships)
+2. Reads the file's ACL
+3. Walks the ACE list looking for entries that match the token
+4. If a matching Deny entry is found -- access denied immediately
+5. If enough matching Allow entries accumulate to satisfy the requested rights -- access granted
+6. If no matching entries found -- access denied
+
+```powershell
+# See the ACL on a file
+Get-Acl "C:\Windows\System32\drivers\etc\hosts" | Format-List
+
+# More readable output
+(Get-Acl "C:\Windows\System32\drivers\etc\hosts").Access |
+  Select-Object IdentityReference, FileSystemRights, AccessControlType |
+  Format-Table -AutoSize
+```
+
+---
+
+## Reading ACL output
+
+```
+IdentityReference        FileSystemRights    AccessControlType
+-----------------        ----------------    -----------------
+NT AUTHORITY\SYSTEM      FullControl         Allow
+BUILTIN\Administrators   FullControl         Allow
+BUILTIN\Users            ReadAndExecute      Allow
+```
+
+This tells you:
+- SYSTEM and Administrators have full control
+- Regular users (BUILTIN\Users) can read and execute but not write
+- There are no Deny entries
+
+When you try to write to this file as a non-admin user, Windows checks your token, finds you match `BUILTIN\Users`, sees only `ReadAndExecute`, and denies the write.
+
+---
+
+## Common permissions
+
+```powershell
+# View your own permissions on a file or directory
+# (effective permissions = all your applicable ACEs combined)
+$path = "C:\path\to\check"
+$acl = Get-Acl $path
+$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+
+# Check specific rights
+$acl.Access | Where-Object {
+  $identity.Groups -contains $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -or
+  $_.IdentityReference.Value -eq $identity.Name
+}
+```
+
+---
+
+## UAC and integrity levels
+
+Windows Vista and later added a second permission system on top of ACLs: integrity levels.
+
+| Level | Used by |
+|---|---|
+| Low | Browser sandboxes, downloaded content |
+| Medium | Normal user processes (default) |
+| High | Elevated processes (Run as Administrator) |
+| System | OS processes |
+
+A Medium integrity process cannot write to a High integrity location even if the ACL would allow it. This is why tools that need to write to `C:\Program Files` require elevation -- the directory has High integrity and standard user processes run at Medium.
+
+```powershell
+# Check the integrity level of a directory
+icacls "C:\Program Files" | Select-String "Mandatory"
+# Output: Mandatory Label\High Mandatory Level:(OI)(CI)(NW)
+
+icacls "C:\Users\logan\AppData\Local" | Select-String "Mandatory"
+# Output: Mandatory Label\Medium Mandatory Level:(OI)(CI)(NW)
+```
+
+---
+
+## Where CLI tools should write files
+
+The permission model has a practical implication for where CLI tools should store their data:
+
+| Location | Requires Admin | Appropriate for |
+|---|---|---|
+| `C:\Program Files\` | Yes | System-wide installs |
+| `C:\ProgramData\` | No (usually) | System-wide app data |
+| `%APPDATA%` (Roaming) | No | User config that syncs |
+| `%LOCALAPPDATA%` | No | User config, large files, cache |
+| `%TEMP%` | No | Temporary files |
+
+```powershell
+# Correct locations for a CLI tool's data
+$configDir = Join-Path $env:APPDATA "MyTool"        # C:\Users\logan\AppData\Roaming\MyTool
+$cacheDir  = Join-Path $env:LOCALAPPDATA "MyTool"   # C:\Users\logan\AppData\Local\MyTool
+$tempDir   = $env:TEMP                              # C:\Users\logan\AppData\Local\Temp
+```
+
+Claude Code's settings should use `%APPDATA%` or `%LOCALAPPDATA%`, not `C:\Program Files`. Tools that write to Program Files require elevation for every write operation.
+
+---
+
+## Diagnosing permission failures
+
+```powershell
+# Check permissions on a path
+Get-Acl "C:\path\to\file" | Format-List
+
+# Check icacls output (more detailed)
+icacls "C:\path\to\file"
+
+# Check if you can write to a directory
+$testFile = Join-Path "C:\target\dir" "permission-test-$(Get-Random).tmp"
+try {
+    New-Item -Path $testFile -ItemType File -ErrorAction Stop | Out-Null
+    Remove-Item -Path $testFile
+    Write-Host "Write access: OK"
+} catch {
+    Write-Host "Write access: DENIED -- $($_.Exception.Message)"
+}
+
+# Check your current identity and groups
+whoami /all
+```
+
+---
+
+## Modifying permissions (when you have the right to do so)
+
+```powershell
+# Grant a user read access to a file
+$acl = Get-Acl "C:\path\to\file"
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    "DOMAIN\username",
+    "Read",
+    "Allow"
+)
+$acl.AddAccessRule($rule)
+Set-Acl "C:\path\to\file" $acl
+
+# Grant the current user write access to a directory (requires existing write access or admin)
+icacls "C:\path\to\dir" /grant "${env:USERNAME}:(OI)(CI)W"
+# (OI) = Object Inherit (applies to files in dir)
+# (CI) = Container Inherit (applies to subdirs)
+# W    = Write
+```
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- Create a test file
+### Step 1 -- Inspect permissions on a protected file
 
 ```powershell
-New-Item test.txt
+# The hosts file -- protected by default
+(Get-Acl "C:\Windows\System32\drivers\etc\hosts").Access |
+  Select-Object IdentityReference, FileSystemRights, AccessControlType |
+  Format-Table -AutoSize
+
+# What happens when you try to write to it?
+try {
+    Add-Content "C:\Windows\System32\drivers\etc\hosts" "# test"
+    Write-Host "Write succeeded"
+} catch {
+    Write-Host "Write failed: $($_.Exception.Message)"
+}
 ```
 
-### Step 2 -- View permissions
+### Step 2 -- Check AppData permissions vs Program Files
 
 ```powershell
-Get-Acl test.txt
+# AppData -- should be writable
+icacls $env:APPDATA | Select-String $env:USERNAME
+
+# Program Files -- should require elevation
+icacls "C:\Program Files" | Select-String "Users"
 ```
 
-### Step 3 -- Try accessing a protected directory
+### Step 3 -- Test write access in a tool-safe way
 
 ```powershell
-cd C:\Windows\System32
-New-Item test.txt
+function Test-WriteAccess($path) {
+    $test = Join-Path $path ".write-test-$(Get-Random)"
+    try {
+        [System.IO.File]::WriteAllText($test, "test")
+        Remove-Item $test -Force
+        return $true
+    } catch { return $false }
+}
+
+Test-WriteAccess $env:APPDATA      # Should be $true
+Test-WriteAccess "C:\Program Files" # Should be $false (without elevation)
 ```
 
 ---
 
 ## What to Notice
 
-- `Get-Acl` shows a list of identities and permissions
-- Some directories (like System32) require elevated privileges
-- You may receive "Access denied" depending on your user context
-- Running PowerShell as Administrator changes your effective permissions
-
----
-
-## Real-World Example
-
-A CLI tool tries to write a config file to:
-
-```
-C:\Program Files\MyApp\
-```
-
-It works when run as Administrator, but fails for a normal user.
-
-Why?
-
-Because `Program Files` is protected and requires elevated permissions for write operations.
-
----
-
-## Debugging Strategy
-
-When you hit a permissions issue:
-
-1. Check what user you are running as
-2. Check the target directory permissions
-3. Try running with elevated privileges
-4. Inspect ACLs using:
-
-```powershell
-Get-Acl <path>
-```
-
-5. Look for:
-   - missing write permissions
-   - explicit deny rules
-   - restricted directories
+- `%APPDATA%` and `%LOCALAPPDATA%` are the correct locations for CLI tool data -- no elevation needed
+- Deny ACEs override Allow ACEs -- a single Deny entry blocks access even if multiple Allow entries would permit it
+- The error code from a permission failure (`EACCES`, `EPERM`, `Access is denied`) does not tell you which ACE caused it -- you need `Get-Acl` or `icacls` to see that
+- UAC integrity levels are separate from ACLs -- a file can have permissive ACLs but still be protected by a High integrity label
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- Windows uses ACLs to control access to resources
-- Each file has entries that define who can do what
-- Permissions depend on both user identity and group membership
-- "Access denied" usually means the ACL does not grant the required permission
+- How Windows evaluates an ACL to determine whether to allow or deny access
+- Why writing to `C:\Program Files` requires elevation even for a file you own
+- Where a CLI tool should write its configuration and cache files
+- How to diagnose an "access denied" error and find the specific ACE causing it
 
-Strong answer example:
+Strong answer:
 
-“If a CLI tool works as Administrator but not as a standard user, I would suspect an ACL issue. I’d inspect the directory permissions, check effective user rights, and confirm whether write access is allowed.”
+"Windows ACL evaluation checks the process security token against the file's ACE list -- any matching Deny stops it immediately, otherwise accumulated Allow entries determine access. For CLI tools, the practical implication is that data should go in APPDATA or LOCALAPPDATA, not Program Files. Program Files has a High integrity label which requires an elevated process to write, even if the ACL would otherwise allow it. When diagnosing access denied failures, I use icacls or Get-Acl to see the ACE list, check which groups the current user belongs to, and look for Deny entries first since those override everything else."
 
 ---
 
@@ -132,37 +250,37 @@ Strong answer example:
   passPercentage={67}
   questions={[
     {
-      question: "What does an ACL define?",
+      question: "A user is a member of a group that has Allow Write on a directory, but also has a personal Deny Write ACE. Can the user write to the directory?",
       options: [
-        "How fast a file can be accessed",
-        "Which users or groups can access a resource and what they can do",
-        "The size of a file",
-        "The location of system binaries"
+        "Yes -- the Allow from the group grants access",
+        "No -- Deny ACEs override Allow ACEs regardless of group membership",
+        "It depends on which ACE was added first",
+        "Yes -- personal ACEs override group ACEs"
       ],
-      answer: "Which users or groups can access a resource and what they can do",
-      explanation: "ACLs define permissions for users and groups on a resource."
+      answer: "No -- Deny ACEs override Allow ACEs regardless of group membership",
+      explanation: "Windows ACL evaluation gives Deny entries absolute priority over Allow entries. A single matching Deny ACE blocks access even if multiple Allow ACEs from group memberships would otherwise permit it."
     },
     {
-      question: "What typically causes 'Access denied' errors?",
+      question: "Why should a CLI tool store its configuration in %APPDATA% rather than C:\\Program Files?",
       options: [
-        "Network latency",
-        "Incorrect file size",
-        "Missing permissions in the ACL",
-        "Node.js version mismatch"
+        "Program Files does not exist on all Windows versions",
+        "Program Files has a High integrity label requiring elevation to write -- APPDATA is writable by normal user processes",
+        "APPDATA is faster to access",
+        "Program Files is for executables only"
       ],
-      answer: "Missing permissions in the ACL",
-      explanation: "If the ACL does not grant the required permission, access is denied."
+      answer: "Program Files has a High integrity label requiring elevation to write -- APPDATA is writable by normal user processes",
+      explanation: "UAC integrity levels prevent Medium-integrity processes (normal users) from writing to High-integrity locations like Program Files, even if ACLs would allow it. APPDATA is Medium integrity and writable without elevation. CLI tools should never require admin to write their own config."
     },
     {
-      question: "Why might a CLI tool work as Administrator but not as a normal user?",
+      question: "What is the right way to check if a process has write access to a directory before attempting to write?",
       options: [
-        "Because administrators use a different operating system",
-        "Because elevated privileges bypass certain permission restrictions",
-        "Because CLI tools only support admin users",
-        "Because PATH is disabled for normal users"
+        "Check if you are running as Administrator",
+        "Try to create and immediately delete a test file -- catch the exception if it fails",
+        "Read the ACL and manually evaluate all ACEs",
+        "Check the directory size"
       ],
-      answer: "Because elevated privileges bypass certain permission restrictions",
-      explanation: "Administrators have broader permissions, allowing access where normal users are restricted."
+      answer: "Try to create and immediately delete a test file -- catch the exception if it fails",
+      explanation: "Manually evaluating ACLs is complex -- group membership, inheritance, integrity levels, and Deny entries all interact. The reliable approach is to attempt the actual operation (creating a temp file) and handle the exception. This is the pattern used in production tooling."
     }
   ]}
 />

@@ -1,132 +1,300 @@
-# Config Precedence
+# Config Precedence in CLI Tools
 
 ## Why this matters
 
-Every serious CLI tool has multiple ways to configure behavior:
+Claude Code resolves configuration from multiple sources -- environment variables, config files, command-line flags, and defaults. When a user reports "my setting is being ignored" or "the wrong API key is being used," the answer is almost always a precedence issue: one source is overriding another in a way the user did not expect.
 
-- command-line flags
-- environment variables
-- config files
-- defaults
-
-If you don’t define clear precedence, your tool becomes unpredictable.
-
-Understanding config precedence helps you:
-
-- debug why a tool is behaving a certain way
-- design tools that are intuitive and reliable
-- explain real-world CLI behavior in interviews
-
-This is one of the most common patterns in modern tooling.
+Understanding how precedence works -- and how to implement it correctly -- is essential for debugging these issues and for building CLI tools that behave predictably.
 
 ---
 
 ## Key Concepts
 
-- CLI tools often support multiple configuration sources:
-  - command-line arguments (`--port=3000`)
-  - environment variables (`PORT=3000`)
-  - config files (`config.json`)
-  - default values
-- These sources must follow a **defined priority order**
-- The most common precedence model:
-
-```text
-CLI flags > Environment variables > Config files > Defaults
-```
-
-- Higher-precedence values override lower ones
+- CLI tools typically support four configuration sources in decreasing priority: flags > env vars > config files > defaults
+- Higher-priority sources override lower-priority sources for the same setting
+- Users expect explicit overrides (flags) to win over implicit configuration (config files)
+- Merging vs overriding matters for object/array settings
+- Config file location resolution has its own precedence (project-level vs user-level vs system-level)
 
 ---
 
-## Quick Summary
+## The standard precedence model
 
-Config precedence determines which value wins when multiple configuration sources define the same setting.
+```
+1. Command-line flags         --api-key=sk-...        (highest priority)
+2. Environment variables      ANTHROPIC_API_KEY=sk-... 
+3. Project config file        .clauderc or claude.json in project root
+4. User config file           ~/.claude/config.json
+5. System config file         /etc/claude/config.json
+6. Default values             hardcoded in the tool     (lowest priority)
+```
+
+This ordering matches user expectations: explicit flags override everything, environment variables override config files (useful for CI), and config files override defaults.
+
+---
+
+## Implementing precedence in TypeScript
+
+```typescript
+interface Config {
+  apiKey: string;
+  model: string;
+  maxTokens: number;
+  debug: boolean;
+}
+
+async function loadConfig(argv: string[]): Promise<Config> {
+  // Load each source independently
+  const defaults = loadDefaults();
+  const systemConfig = await loadConfigFile("/etc/claude/config.json");
+  const userConfig = await loadConfigFile(path.join(os.homedir(), ".claude", "config.json"));
+  const projectConfig = await loadConfigFile(path.join(process.cwd(), ".clauderc"));
+  const envConfig = loadFromEnv();
+  const flagConfig = parseFlags(argv);
+
+  // Merge in priority order -- later sources override earlier ones
+  return {
+    ...defaults,
+    ...systemConfig,
+    ...userConfig,
+    ...projectConfig,
+    ...envConfig,
+    ...flagConfig,
+  };
+}
+```
+
+The spread operator handles precedence cleanly: each source overwrites keys from lower-priority sources. Later spread wins.
+
+---
+
+## Loading from environment variables
+
+```typescript
+function loadFromEnv(): Partial<Config> {
+  const config: Partial<Config> = {};
+
+  // Map env var names to config keys
+  const envMapping: Record<string, keyof Config> = {
+    ANTHROPIC_API_KEY: "apiKey",
+    CLAUDE_MODEL: "model",
+    CLAUDE_MAX_TOKENS: "maxTokens",
+    CLAUDE_DEBUG: "debug",
+  };
+
+  for (const [envVar, configKey] of Object.entries(envMapping)) {
+    const value = process.env[envVar];
+    if (value !== undefined) {
+      // Type coercion based on expected type
+      if (configKey === "maxTokens") {
+        config[configKey] = parseInt(value, 10);
+      } else if (configKey === "debug") {
+        config[configKey] = value === "1" || value.toLowerCase() === "true";
+      } else {
+        (config as Record<string, unknown>)[configKey] = value;
+      }
+    }
+  }
+
+  return config;
+}
+```
+
+---
+
+## Config file location resolution
+
+Where does the tool look for config files? This itself has a precedence:
+
+```typescript
+async function findConfigFile(filename: string): Promise<string | null> {
+  // 1. Check explicit path from env var
+  const explicit = process.env.CLAUDE_CONFIG;
+  if (explicit && await fileExists(explicit)) return explicit;
+
+  // 2. Walk up from current directory to find project-level config
+  let dir = process.cwd();
+  while (true) {
+    const candidate = path.join(dir, filename);
+    if (await fileExists(candidate)) return candidate;
+    
+    const parent = path.dirname(dir);
+    if (parent === dir) break;  // reached root
+    dir = parent;
+  }
+
+  // 3. User-level config
+  const userConfig = path.join(os.homedir(), ".claude", filename);
+  if (await fileExists(userConfig)) return userConfig;
+
+  // 4. System-level config
+  const systemConfig = process.platform === "win32"
+    ? path.join(process.env.ProgramData ?? "C:\\ProgramData", "claude", filename)
+    : `/etc/claude/${filename}`;
+  if (await fileExists(systemConfig)) return systemConfig;
+
+  return null;
+}
+```
+
+---
+
+## The Windows config location
+
+On Windows, config files should follow the platform conventions:
+
+```typescript
+function getConfigDir(): string {
+  if (process.platform === "win32") {
+    // Use APPDATA for user config -- never C:\Program Files
+    return path.join(process.env.APPDATA ?? os.homedir(), "Claude");
+  } else if (process.platform === "darwin") {
+    // macOS: ~/Library/Application Support/ or ~/.config/
+    return path.join(os.homedir(), ".config", "claude");
+  } else {
+    // Linux: XDG Base Directory spec
+    return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "claude");
+  }
+}
+```
+
+This is a concrete Windows platform difference. Tools that hardcode `~/.config/tool` work on macOS and Linux but put config in an unusual location on Windows.
+
+---
+
+## Debugging precedence issues
+
+When a user says "my setting is being ignored":
+
+```typescript
+// Add a debug mode that shows where each config value came from
+async function loadConfigWithTrace(argv: string[]): Promise<Config> {
+  const sources = {
+    defaults: loadDefaults(),
+    system: await loadConfigFile(systemConfigPath),
+    user: await loadConfigFile(userConfigPath),
+    project: await loadConfigFile(projectConfigPath),
+    env: loadFromEnv(),
+    flags: parseFlags(argv),
+  };
+
+  if (process.env.CLAUDE_DEBUG_CONFIG) {
+    for (const [sourceName, sourceConfig] of Object.entries(sources)) {
+      for (const [key, value] of Object.entries(sourceConfig ?? {})) {
+        if (value !== undefined) {
+          console.error(`[config] ${key} = ${JSON.stringify(value)} (from ${sourceName})`);
+        }
+      }
+    }
+  }
+
+  return { ...sources.defaults, ...sources.system, ...sources.user, 
+           ...sources.project, ...sources.env, ...sources.flags };
+}
+```
+
+This is invaluable for support. A user can run with `CLAUDE_DEBUG_CONFIG=1` and immediately see which source is winning for each setting.
+
+---
+
+## Merging vs overriding
+
+Simple values (strings, numbers, booleans) are straightforward to override. Objects and arrays need a decision:
+
+```typescript
+// Simple override -- later source replaces entire object
+const merged = { ...defaults.proxy, ...userConfig.proxy };
+
+// Deep merge -- later source only replaces specified keys
+function deepMerge<T>(base: T, override: Partial<T>): T {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    if (value !== null && typeof value === "object" && !Array.isArray(value) &&
+        key in result && typeof result[key as keyof T] === "object") {
+      result[key as keyof T] = deepMerge(result[key as keyof T], value as Partial<T[keyof T]>);
+    } else {
+      result[key as keyof T] = value as T[keyof T];
+    }
+  }
+  return result;
+}
+```
+
+The right choice depends on user expectations. For a list of allowed commands, deep merge is usually wrong -- users expect their list to replace the default, not extend it.
 
 ---
 
 ## Quick Lab
 
-### Step 1 -- Simulate environment variable
+### Step 1 -- Observe precedence in a real tool
 
 ```powershell
-$env:PORT=4000
+# npm uses config precedence -- observe it
+npm config list       # shows all config sources
+npm config list --json # machine-readable
+
+# Set a value at different levels
+npm config set cache "C:\temp\npm-cache" --global  # user-level
+$env:npm_config_cache = "C:\env-override"           # env var (overrides user)
+
+# Which wins?
+npm config get cache  # should show env var value
 ```
 
-### Step 2 -- Simulate CLI argument
+### Step 2 -- Trace Claude Code config
 
-```bash
-node app.js --port=3000
+```powershell
+# If CLAUDE_DEBUG_CONFIG is supported:
+$env:CLAUDE_DEBUG_CONFIG = "1"
+claude "hello"
+# Watch for [config] lines showing where each setting came from
+
+Remove-Item Env:\CLAUDE_DEBUG_CONFIG
 ```
 
-### Step 3 -- Inside your app (conceptually)
+### Step 3 -- Check where config files exist on your system
 
-```js
-const port =
-  cliArgPort ||
-  process.env.PORT ||
-  configFile.port ||
-  8080;
+```powershell
+# Look for Claude Code config files
+$locations = @(
+    (Join-Path $env:APPDATA "Claude"),
+    (Join-Path $env:LOCALAPPDATA "Claude"),
+    (Join-Path $env:USERPROFILE ".claude"),
+    (Join-Path (Get-Location) ".claude"),
+    (Join-Path (Get-Location) ".clauderc")
+)
+
+foreach ($loc in $locations) {
+    if (Test-Path $loc) {
+        Write-Host "Found: $loc"
+        Get-ChildItem $loc -ErrorAction SilentlyContinue
+    }
+}
 ```
 
 ---
 
 ## What to Notice
 
-- CLI arguments override everything else
-- Environment variables override config files
-- Defaults are only used if nothing else is provided
-- This creates predictable, debuggable behavior
-
----
-
-## Real-World Example
-
-A CLI tool runs with:
-
-- config file: `port = 5000`
-- environment variable: `PORT=4000`
-- CLI flag: `--port=3000`
-
-Result:
-
-```
-3000
-```
-
-Why?
-
-Because CLI flags have the highest precedence.
-
----
-
-## Debugging Strategy
-
-When a tool behaves unexpectedly:
-
-1. Check CLI arguments first
-2. Check environment variables
-3. Check config files
-4. Confirm default values
-
-Always think:
-
-👉 “Which layer is overriding which?”
+- Flags beat everything -- a user with a flag override should always win
+- Environment variables are the right mechanism for CI configuration -- they override config files without modifying them
+- Config file walking (searching parent directories) is how project-level vs user-level config works -- the nearest config to the current directory wins
+- On Windows, config should go in `%APPDATA%` not `~/.config` -- `~` on Windows resolves to a different location than Unix engineers expect
 
 ---
 
 ## Interview Angle
 
-You should be able to explain:
+Be ready to explain:
 
-- Tools support multiple configuration sources
-- A clear precedence order prevents confusion
-- CLI flags typically override everything
-- This pattern is used across many real-world tools
+- The standard precedence model and why flags beat env vars beat config files
+- Why environment variables are preferred for CI configuration
+- How config file location resolution works (walking up from cwd)
+- How to implement a debug mode that shows which source each value came from
 
-Strong answer example:
+Strong answer:
 
-“I would define a clear precedence order where CLI arguments override environment variables, which override config files, which override defaults. That ensures users can always explicitly control behavior when needed.”
+"The standard precedence is flags > env vars > project config > user config > defaults. Flags are explicit user intent so they always win. Env vars are useful for CI because they override config files without touching the filesystem -- you can set ANTHROPIC_API_KEY in the CI environment and it works regardless of what is in any config file. For debugging 'my setting is being ignored' reports, a config tracing mode that logs which source each value came from is invaluable -- it turns a mysterious problem into an obvious one."
 
 ---
 
@@ -135,37 +303,37 @@ Strong answer example:
   passPercentage={67}
   questions={[
     {
-      question: "Which configuration source typically has the highest priority?",
+      question: "A user sets model=claude-3 in their config file but runs the tool with --model=claude-opus. Which model is used?",
       options: [
-        "Config file",
-        "Defaults",
-        "Environment variables",
-        "CLI arguments"
+        "claude-3 -- config files take priority over flags",
+        "claude-opus -- command-line flags have the highest priority",
+        "The tool uses a random model",
+        "The tool throws an error due to conflicting values"
       ],
-      answer: "CLI arguments",
-      explanation: "CLI arguments are usually designed to override all other configuration sources."
+      answer: "claude-opus -- command-line flags have the highest priority",
+      explanation: "The standard precedence model puts command-line flags at the top. They represent explicit user intent at runtime and should always override implicit configuration from files or environment variables."
     },
     {
-      question: "Why is config precedence important?",
+      question: "Why are environment variables the preferred way to configure CLI tools in CI/CD pipelines?",
       options: [
-        "It improves CPU performance",
-        "It ensures predictable behavior when multiple config sources exist",
-        "It removes the need for config files",
-        "It only applies to Windows systems"
+        "Environment variables are faster to read",
+        "They override config files without modifying the filesystem -- CI secrets can be set without committing them to the repo",
+        "Config files do not work in CI",
+        "Environment variables are more secure than flags"
       ],
-      answer: "It ensures predictable behavior when multiple config sources exist",
-      explanation: "Without precedence, tools become inconsistent and difficult to debug."
+      answer: "They override config files without modifying the filesystem -- CI secrets can be set without committing them to the repo",
+      explanation: "CI systems can inject env vars (like API keys) into the build environment without those values ever touching a config file. They override project and user config, providing a clean way to configure tools for CI without changing committed files."
     },
     {
-      question: "What happens if no config source provides a value?",
+      question: "Where should a CLI tool store user configuration files on Windows?",
       options: [
-        "The program crashes",
-        "The OS provides a value",
-        "The default value is used",
-        "The registry is always used"
+        "C:\\Program Files\\ToolName\\",
+        "~\\.config\\toolname\\ (same as Linux)",
+        "%APPDATA%\\ToolName\\ (C:\\Users\\username\\AppData\\Roaming\\ToolName\\)",
+        "C:\\Windows\\System32\\config\\"
       ],
-      answer: "The default value is used",
-      explanation: "Defaults act as a fallback when no other configuration is provided."
+      answer: "%APPDATA%\\ToolName\\ (C:\\Users\\username\\AppData\\Roaming\\ToolName\\)",
+      explanation: "%APPDATA% is the Windows convention for user-specific application data. It does not require elevation to write, roams with the user profile on domain machines, and is backed up by some Windows backup tools. Hardcoding ~/.config/toolname creates an unusual path on Windows since ~ resolves differently."
     }
   ]}
 />
